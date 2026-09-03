@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUpDown, CheckCircle2, Filter, Layers3, Search, Table2 } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, CheckCircle2, Filter, Layers3, Save, Search, Table2 } from 'lucide-react';
 import api from '../api';
 import { isAuthenticated } from '../auth';
 import { findDefaultKey, isCompleted, mergeLkRows, normalizeHeader } from '../utils/lkMerge';
@@ -70,6 +70,17 @@ const detectNoteColumns = (headers) => {
   });
 };
 
+const resolveSavedMappings = (sources, savedKeys, aliases) => {
+  const hasSourceKeys = Object.keys(savedKeys || {}).some((key) => sources.some((source) => source.sourceKey === key));
+  if (hasSourceKeys) return savedKeys;
+  return Object.fromEntries(
+    sources.map((source) => {
+      const match = source.headers.find((header) => Object.values(aliases || {}).some((values) => (Array.isArray(values) ? values : [values]).some((value) => normalizeHeader(value) === normalizeHeader(header))));
+      return [source.sourceKey, match || findDefaultKey(source.headers)];
+    }),
+  );
+};
+
 const getSheetSources = (worksheetPayload) => {
   if (!worksheetPayload) return [];
 
@@ -97,10 +108,12 @@ export default function PenyelesaianDetail() {
   const navigate = useNavigate();
   const authenticated = isAuthenticated();
   const [sources, setSources] = useState([]);
+  const [sourceGroup, setSourceGroup] = useState('ALL');
   const [selectedKey, setSelectedKey] = useState('');
+  const [keyMappings, setKeyMappings] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [sheetFilter, setSheetFilter] = useState('ALL');
+  const [selectedSheetKeys, setSelectedSheetKeys] = useState([]);
   const [columnFilters, setColumnFilters] = useState({});
   const [sortConfig, setSortConfig] = useState({ key: '', direction: 'asc' });
   const [filterMenuOpen, setFilterMenuOpen] = useState(null);
@@ -109,6 +122,9 @@ export default function PenyelesaianDetail() {
   const [statusColumnChoice, setStatusColumnChoice] = useState('');
   const [dateColumnChoice, setDateColumnChoice] = useState('');
   const [noteColumnChoice, setNoteColumnChoice] = useState('');
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [mappingSaving, setMappingSaving] = useState(false);
+  const [mappingMessage, setMappingMessage] = useState('');
   const [showFieldSettings, setShowFieldSettings] = useState(true);
   const [surveyName, setSurveyName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -127,15 +143,21 @@ export default function PenyelesaianDetail() {
           records = [{ spreadsheet_id: spreadsheetId, uploaded_by: 'LK' }];
         }
 
+        let separateGroup = 0;
         const loadedSources = await Promise.all(
-          records.map(async (record) => {
+          records.map(async (record, recordIndex) => {
+            const isSeparate = record.gabung_dengan_sebelumnya === false || record.gabung_dengan_sebelumnya === 'false';
+            if (recordIndex > 0 && isSeparate) separateGroup += 1;
+            const groupId = `group-${separateGroup}`;
             const response = await api.get(`/sheets/data/${record.spreadsheet_id}`);
             const sheetItems = getSheetSources(response.data || {});
             const normalizedSheets = sheetItems.map((sheetItem, index) => ({
               id: record.id ?? `${record.spreadsheet_id}-${index}`,
+              sourceKey: `${record.spreadsheet_id}::${sheetItem.sheetName || `Sheet${index + 1}`}`,
               spreadsheetId: record.spreadsheet_id,
               sheetName: sheetItem.sheetName || `Sheet${index + 1}`,
-              label: record.uploaded_by || 'LK',
+              label: record.nama_lk || record.nama_file || record.file_name || `LK ${recordIndex + 1}`,
+              groupId,
               headers: sheetItem.headers || [],
               data: sheetItem.data || [],
             }));
@@ -146,11 +168,12 @@ export default function PenyelesaianDetail() {
 
         const allSources = loadedSources.flat();
         setSources(allSources);
+        setSourceGroup('ALL');
         if (surveiId && records[0]?.daftar_survei?.nama_survei) {
           setSurveyName(records[0].daftar_survei.nama_survei);
         } else if (surveiId) {
           try {
-            const surveyResponse = await api.get(`/survei/${surveiId}`);
+            const surveyResponse = await api.get(`/penyelesaian/survei/${surveiId}`);
             setSurveyName(surveyResponse.data?.nama_survei || '');
           } catch {
             setSurveyName('');
@@ -158,8 +181,24 @@ export default function PenyelesaianDetail() {
         } else {
           setSurveyName('');
         }
-        setSheetFilter('ALL');
-        setSelectedKey(findDefaultKey([...new Set(allSources.flatMap((source) => source.headers))]));
+        setSelectedSheetKeys(allSources.map((source) => source.sourceKey));
+        const defaultKey = findDefaultKey([...new Set(allSources.flatMap((source) => source.headers))]);
+        setSelectedKey(defaultKey);
+        const defaults = Object.fromEntries(allSources.map((source) => [source.sourceKey, findDefaultKey(source.headers)]));
+        if (surveiId) {
+          try {
+            const mappingResponse = await api.get(`/penyelesaian/survei/${surveiId}/column-mapping`);
+            const savedKeys = mappingResponse.data?.key_mappings || mappingResponse.data?.source_keys || {};
+            const savedMapping = mappingResponse.data?.column_mapping || mappingResponse.data?.mapping || {};
+            setKeyMappings({ ...defaults, ...resolveSavedMappings(allSources, savedKeys, savedMapping) });
+            if (mappingResponse.data?.key_column) setSelectedKey(mappingResponse.data.key_column);
+          } catch (mappingError) {
+            if (mappingError.response?.status !== 404) setMappingMessage('Konfigurasi standar belum dapat dimuat.');
+            setKeyMappings(defaults);
+          }
+        } else {
+          setKeyMappings(defaults);
+        }
       } catch (requestError) {
         setError(requestError.response?.data?.error || 'Gagal mengambil data LK.');
       } finally {
@@ -169,10 +208,31 @@ export default function PenyelesaianDetail() {
     loadData();
   }, [surveiId, spreadsheetId]);
 
+  async function saveColumnMapping() {
+    if (!surveiId) return;
+    setMappingSaving(true);
+    setMappingMessage('');
+    try {
+      await api.put(`/penyelesaian/survei/${surveiId}/column-mapping`, { key_column: selectedKey, key_mappings: keyMappings, column_mapping: keyMappings });
+      setMappingMessage('Konfigurasi standar berhasil disimpan.');
+    } catch (requestError) {
+      setMappingMessage(requestError.response?.data?.error || 'Konfigurasi belum berhasil disimpan.');
+    } finally {
+      setMappingSaving(false);
+    }
+  }
+
   const headers = useMemo(() => [...new Set(sources.flatMap((source) => source.headers))], [sources]);
-  const sheetNames = useMemo(() => [...new Set(sources.map((source) => source.sheetName))], [sources]);
-  const activeSources = useMemo(() => (sheetFilter === 'ALL' ? sources : sources.filter((source) => source.sheetName === sheetFilter)), [sheetFilter, sources]);
-  const merged = useMemo(() => mergeLkRows(activeSources, selectedKey), [activeSources, selectedKey]);
+  const sheetOptions = useMemo(() => sources.map((source) => ({ key: source.sourceKey, label: `${source.label} / ${source.sheetName}` })), [sources]);
+  const sourceGroups = useMemo(() => {
+    const groups = [...new Set(sources.map((source) => source.groupId))];
+    return groups.map((groupId, index) => ({ groupId, label: sources.find((source) => source.groupId === groupId)?.label || `LK ${index + 1}` }));
+  }, [sources]);
+  const activeSources = useMemo(() => {
+    const groupedSources = sourceGroup === 'ALL' ? sources : sources.filter((source) => source.groupId === sourceGroup);
+    return groupedSources.filter((source) => selectedSheetKeys.includes(source.sourceKey));
+  }, [selectedSheetKeys, sourceGroup, sources]);
+  const merged = useMemo(() => mergeLkRows(activeSources, selectedKey, keyMappings), [activeSources, keyMappings, selectedKey]);
   const detectedStatusColumns = useMemo(() => detectStatusColumns(headers, merged.rows), [headers, merged.rows]);
   const detectedDateColumns = useMemo(() => detectDateColumns(headers, merged.rows), [headers, merged.rows]);
   const detectedNoteColumns = useMemo(() => detectNoteColumns(headers), [headers]);
@@ -334,21 +394,42 @@ export default function PenyelesaianDetail() {
           <ArrowLeft size={20} />
         </button>
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Gabungan {sources.length} LK</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{sourceGroup === 'ALL' ? `Gabungan ${new Set(sources.map((source) => source.spreadsheetId)).size} LK` : 'LK terpisah'}</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">Penyelesaian Anomali{surveyName ? ` · ${surveyName}` : ''}</h1>
-          <p className="text-sm text-slate-500">Kolom berbeda digabung berdasarkan referensi yang dipilih.</p>
+          <p className="text-sm text-slate-500">Periksa dan tandai data yang sudah diselesaikan.</p>
         </div>
       </header>
 
+      {sourceGroups.length > 0 && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pilih sumber data</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" onClick={() => setSourceGroup('ALL')} className={`rounded-xl px-3 py-2 text-sm font-semibold ${sourceGroup === 'ALL' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+              Semua LK
+            </button>
+            {sourceGroups.map((group, index) => (
+              <button
+                key={group.groupId}
+                type="button"
+                onClick={() => setSourceGroup(group.groupId)}
+                className={`rounded-xl px-3 py-2 text-sm font-semibold ${sourceGroup === group.groupId ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >
+                {group.label || `LK ${index + 1}`}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="grid gap-4 sm:grid-cols-3">
-        <Stat icon={<Table2 />} label="Total unik" value={stats.total} color="blue" />
+        <Stat icon={<Table2 />} label="Total data" value={stats.total} color="blue" />
         <Stat icon={<CheckCircle2 />} label="Selesai" value={stats.completed} color="emerald" />
         <Stat icon={<Layers3 />} label="Belum selesai" value={stats.pending} color="amber" />
       </section>
 
       <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <label className="min-w-56 flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Kolom induk referensi
+          Gabungkan berdasarkan kolom
           <select value={selectedKey} onChange={(event) => setSelectedKey(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
             <option value="">Pilih kolom...</option>
             {headers.map((header) => (
@@ -358,6 +439,41 @@ export default function PenyelesaianDetail() {
             ))}
           </select>
         </label>
+
+        {showAdvancedSettings && (
+          <div className="min-w-64 flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Pencocokan kolom per LK / sheet
+            <div className="mt-2 max-h-32 space-y-2 overflow-auto rounded-xl border border-slate-300 p-2">
+              {activeSources.map((source) => (
+                <div key={source.sourceKey} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-xs font-normal text-slate-600" title={`${source.label} / ${source.sheetName}`}>
+                    {source.label} / {source.sheetName}
+                  </span>
+                  <select
+                    value={keyMappings[source.sourceKey] || ''}
+                    onChange={(event) => setKeyMappings((current) => ({ ...current, [source.sourceKey]: event.target.value }))}
+                    className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-800"
+                  >
+                    <option value="">Tidak dicocokkan</option>
+                    {source.headers.map((header) => (
+                      <option key={`${source.sourceKey}-${header}`} value={header}>
+                        {header}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            {authenticated && surveiId && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button type="button" onClick={saveColumnMapping} disabled={mappingSaving} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                  <Save size={14} /> {mappingSaving ? 'Menyimpan...' : 'Simpan standar admin'}
+                </button>
+                {mappingMessage && <span className="text-xs font-normal text-slate-500">{mappingMessage}</span>}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="relative min-w-64 flex-1">
           <Search className="absolute left-3 top-3 text-slate-400" size={17} />
@@ -373,23 +489,29 @@ export default function PenyelesaianDetail() {
           </select>
         </label>
 
-        <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Freeze kolom
-          <select value={freezeColumnsCount} onChange={(event) => setFreezeColumnsCount(Number(event.target.value))} className="mt-2 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
-            {[0, 1, 2, 3, 4].map((value) => (
-              <option key={value} value={value}>
-                {value === 0 ? 'Tidak ada' : `${value} kolom`}
-              </option>
-            ))}
-          </select>
-        </label>
+        {showAdvancedSettings && (
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Bekukan kolom
+            <select value={freezeColumnsCount} onChange={(event) => setFreezeColumnsCount(Number(event.target.value))} className="mt-2 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
+              {[0, 1, 2, 3, 4].map((value) => (
+                <option key={value} value={value}>
+                  {value === 0 ? 'Tidak ada' : `${value} kolom`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <button type="button" onClick={() => setShowAdvancedSettings((value) => !value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+          {showAdvancedSettings ? 'Tutup pengaturan' : 'Pengaturan lanjutan'}
+        </button>
 
         <span className="flex items-center gap-2 pb-2 text-xs text-slate-500">
           <Filter size={15} /> {sortedRows.length} baris tampil
         </span>
       </section>
 
-      {(detectedStatusColumns.length > 0 || detectedDateColumns.length > 0 || detectedNoteColumns.length > 0) && (
+      {showAdvancedSettings && (detectedStatusColumns.length > 0 || detectedDateColumns.length > 0 || detectedNoteColumns.length > 0) && (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -443,48 +565,64 @@ export default function PenyelesaianDetail() {
         </section>
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Tampilkan / sembunyikan kolom</p>
-            <p className="text-xs text-slate-500">Pilih kolom yang ingin ditampilkan di tabel.</p>
+      {showAdvancedSettings && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Tampilkan / sembunyikan kolom</p>
+              <p className="text-xs text-slate-500">Pilih kolom yang ingin ditampilkan di tabel.</p>
+            </div>
           </div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {headers.map((header) => {
-            const isHidden = hiddenColumns.includes(header);
-            const isStatusLike = normalizeHeader(header) === 'status_penyelesaian' || normalizeHeader(header) === 'tanggal_selesai';
-            if (isStatusLike) return null;
+          <div className="mt-3 flex flex-wrap gap-2">
+            {headers.map((header) => {
+              const isHidden = hiddenColumns.includes(header);
+              const isStatusLike = normalizeHeader(header) === 'status_penyelesaian' || normalizeHeader(header) === 'tanggal_selesai';
+              if (isStatusLike) return null;
 
-            return (
-              <button
-                key={header}
-                type="button"
-                onClick={() => handleToggleHiddenColumn(header)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isHidden ? 'border-slate-300 bg-slate-100 text-slate-500' : 'border-blue-200 bg-blue-50 text-blue-700'}`}
-              >
-                {isHidden ? 'Tampilkan' : 'Sembunyikan'} · {header}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+              return (
+                <button
+                  key={header}
+                  type="button"
+                  onClick={() => handleToggleHiddenColumn(header)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isHidden ? 'border-slate-300 bg-slate-100 text-slate-500' : 'border-blue-200 bg-blue-50 text-blue-700'}`}
+                >
+                  {isHidden ? 'Tampilkan' : 'Sembunyikan'} · {header}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
-      {sheetNames.length > 1 && (
+      {showAdvancedSettings && sheetOptions.length > 1 && (
         <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setSheetFilter('ALL')} className={`rounded-full px-3 py-1.5 text-sm font-medium ${sheetFilter === 'ALL' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
-              Semua sheet
-            </button>
-            {sheetNames.map((sheetName) => (
-              <button
-                key={sheetName}
-                type="button"
-                onClick={() => setSheetFilter(sheetName)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium ${sheetFilter === sheetName ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}
-              >
-                {sheetName}
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Pilih sheet yang ditampilkan</p>
+              <p className="text-xs text-slate-500">Sheet yang tidak dipilih tidak ikut digabung.</p>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSelectedSheetKeys(sheetOptions.map((sheet) => sheet.key))} className="text-xs font-semibold text-blue-600 hover:underline">
+                Pilih semua
               </button>
+              <button type="button" onClick={() => setSelectedSheetKeys([])} className="text-xs font-semibold text-slate-500 hover:underline">
+                Kosongkan
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {sheetOptions.map((sheet) => (
+              <label key={sheet.key} className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={selectedSheetKeys.includes(sheet.key)}
+                  onChange={() => setSelectedSheetKeys((current) => (current.includes(sheet.key) ? current.filter((key) => key !== sheet.key) : [...current, sheet.key]))}
+                  className="h-4 w-4 accent-blue-600"
+                />
+                <span className="truncate" title={sheet.label}>
+                  {sheet.label}
+                </span>
+              </label>
             ))}
           </div>
         </section>

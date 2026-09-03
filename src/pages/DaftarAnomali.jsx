@@ -3,8 +3,68 @@ import { useState, useEffect, useMemo } from 'react';
 import { Database, Play, Plus, X, Pencil, Trash2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import api from '../api';
 import DataTable from '../components/DataTable';
+import UploadDropzone from '../components/UploadDropzone';
 
 const PAGE_SIZE = 8;
+
+function formatSql(sql) {
+  const normalized = String(sql || '')
+    .replace(/\r\n?/g, '\n')
+    .trim();
+  if (!normalized) return '';
+  return normalized.endsWith(';') ? normalized : `${normalized};`;
+}
+
+async function readZipSqlFiles(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const view = new DataView(bytes.buffer);
+  const endOfCentralDirectory = 0x06054b50;
+  const centralDirectoryEntry = 0x02014b50;
+  const localFileHeader = 0x04034b50;
+  let directoryOffset = -1;
+  for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 65557); offset -= 1) {
+    if (view.getUint32(offset, true) === endOfCentralDirectory) {
+      directoryOffset = view.getUint32(offset + 16, true);
+      break;
+    }
+  }
+  if (directoryOffset < 0) throw new Error('ZIP tidak valid.');
+
+  const sqlFiles = [];
+  let offset = directoryOffset;
+  while (offset + 46 <= bytes.length && view.getUint32(offset, true) === centralDirectoryEntry) {
+    const compressionMethod = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const fileNameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const fileName = new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + fileNameLength));
+    offset += 46 + fileNameLength + extraLength + commentLength;
+    if (!fileName.toLowerCase().endsWith('.sql') || fileName.endsWith('/')) continue;
+    if (view.getUint32(localOffset, true) !== localFileHeader) throw new Error(`ZIP entry tidak valid: ${fileName}`);
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const compressed = bytes.slice(localOffset + 30 + localNameLength + localExtraLength, localOffset + 30 + localNameLength + localExtraLength + compressedSize);
+    let content;
+    if (compressionMethod === 0) content = compressed;
+    else if (compressionMethod === 8) content = new Uint8Array(await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    else throw new Error(`Kompresi ZIP tidak didukung: ${fileName}`);
+    sqlFiles.push({ name: fileName, content: new TextDecoder().decode(content) });
+  }
+  if (!sqlFiles.length) throw new Error('ZIP tidak berisi file .sql.');
+  return sqlFiles;
+}
+
+async function readSqlInput(fileList) {
+  const files = [...fileList];
+  const sqlFiles = [];
+  for (const file of files) {
+    if (file.name.toLowerCase().endsWith('.zip')) sqlFiles.push(...(await readZipSqlFiles(file)));
+    else sqlFiles.push({ name: file.name, content: await file.text() });
+  }
+  return sqlFiles.map(({ name, content }) => `-- ${name}\n${formatSql(content)}`).join('\n\n');
+}
 
 export default function DaftarAnomali() {
   const [anomaliList, setAnomaliList] = useState([]);
@@ -13,6 +73,8 @@ export default function DaftarAnomali() {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sqlFileLoading, setSqlFileLoading] = useState(false);
+  const [sqlFiles, setSqlFiles] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Form State
@@ -39,11 +101,7 @@ export default function DaftarAnomali() {
   const safePage = Math.min(currentPage, totalPages);
   const paginatedAnomali = filteredAnomali.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  const fetchData = async () => {
+  async function fetchData() {
     try {
       setLoading(true);
       // Fetch Anomali & Survei secara paralel
@@ -55,7 +113,7 @@ export default function DaftarAnomali() {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   const handleSimpanAnomali = async (e) => {
     e.preventDefault();
@@ -65,9 +123,26 @@ export default function DaftarAnomali() {
       setIsModalOpen(false);
       setEditingId(null);
       setFormData({ id_survei: '', jenis_anomali: '', sql_query: '' });
+      setSqlFiles([]);
       fetchData(); // Refresh tabel
     } catch (error) {
       alert('Gagal menyimpan anomali: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const handleSqlFile = async (event) => {
+    const files = event.target.files;
+    if (!files?.length) return;
+    setSqlFileLoading(true);
+    try {
+      const sqlQuery = await readSqlInput(files);
+      setSqlFiles([...files]);
+      setFormData((current) => ({ ...current, sql_query: sqlQuery }));
+    } catch (error) {
+      alert(`Gagal membaca file SQL: ${error.message}`);
+    } finally {
+      setSqlFileLoading(false);
+      event.target.value = '';
     }
   };
 
@@ -93,7 +168,7 @@ export default function DaftarAnomali() {
     if (query) {
       try {
         await navigator.clipboard.writeText(query);
-      } catch (error) {
+      } catch {
         const fallback = document.createElement('textarea');
         fallback.value = query;
         fallback.setAttribute('readonly', '');
@@ -130,7 +205,10 @@ export default function DaftarAnomali() {
               <Search className="absolute left-3 top-3 text-slate-400" size={16} />
               <input
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) => {
+                  setSearchTerm(event.target.value);
+                  setCurrentPage(1);
+                }}
                 placeholder="Cari survei, jenis anomali, atau query..."
                 className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-700 outline-none ring-0 focus:border-blue-500"
               />
@@ -246,6 +324,15 @@ export default function DaftarAnomali() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">SQL Query Rule</label>
                   <p className="text-xs text-slate-500 mb-2">Masukkan query `SELECT` lengkap yang akan menghasilkan tabel baris anomali. Pastikan kolom yang dihasilkan sesuai format standar (Kecamatan, Desa, KODE_SUB_SLS, dll).</p>
+                  <UploadDropzone
+                    accept=".sql,.zip,application/sql,application/zip"
+                    multiple
+                    files={sqlFiles}
+                    onFiles={handleSqlFile}
+                    title={sqlFileLoading ? 'Membaca file SQL...' : 'Pilih file SQL atau ZIP'}
+                    description="Tarik file .sql atau ZIP berisi kumpulan .sql ke sini"
+                    className="mb-2"
+                  />
                   <textarea
                     required
                     rows={12}

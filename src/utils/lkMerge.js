@@ -30,7 +30,7 @@ function mergeValue(currentValue, incomingValue) {
   return `${current} / ${incoming}`;
 }
 
-export function mergeLkRows(sources, keyColumn) {
+export function mergeLkRows(sources, keyColumn, keyMappings = {}) {
   const standardHeaders = ['Jenis Anomali', 'PCL', 'PJ', 'Link'];
   const allHeaders = [...new Set([...sources.flatMap((source) => source.headers || []), ...standardHeaders])];
   const statusHeader = allHeaders.find((header) => normalizeHeader(header) === 'status_penyelesaian');
@@ -38,8 +38,10 @@ export function mergeLkRows(sources, keyColumn) {
   const rowsByKey = new Map();
 
   sources.forEach((source) => {
+    const sourceKeyColumn = Object.prototype.hasOwnProperty.call(keyMappings, source.sourceKey) ? keyMappings[source.sourceKey] : keyColumn;
+    if (!sourceKeyColumn) return;
     (source.data || []).forEach((row, rowIndex) => {
-      const key = rowKey(row, keyColumn);
+      const key = rowKey(row, sourceKeyColumn);
       if (!key) return;
       const existing = rowsByKey.get(key);
       const rowMeta = {

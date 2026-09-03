@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CheckCircle, FileSpreadsheet, Link as LinkIcon, Plus, Trash2, UploadCloud } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Copy, FileSpreadsheet, Link as LinkIcon, Plus, Share2, Trash2, UploadCloud, X } from 'lucide-react';
 import api from '../api';
 import { isAuthenticated } from '../auth';
+import UploadDropzone from '../components/UploadDropzone';
 
 export default function PenyelesaianLK() {
   const authenticated = isAuthenticated();
@@ -12,8 +13,13 @@ export default function PenyelesaianLK() {
   const [selectedSurveiId, setSelectedSurveiId] = useState('');
   const [linkInput, setLinkInput] = useState('');
   const [fileInput, setFileInput] = useState(null);
+  const [mergeWithPrevious, setMergeWithPrevious] = useState(true);
   const [isInjecting, setIsInjecting] = useState(false);
   const [message, setMessage] = useState(null);
+  const [nama, setNama] = useState('');
+  const [shareModal, setShareModal] = useState(null);
+  const [shareLinks, setShareLinks] = useState([]);
+  const [shareLoading, setShareLoading] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -79,11 +85,19 @@ export default function PenyelesaianLK() {
         spreadsheetId = response.data.spreadsheetId;
         spreadsheetUrl = response.data.webViewLink || response.data.spreadsheetUrl;
       }
-      await api.post('/penyelesaian', { id_survei: selectedSurveiId, link_spreadsheet_anomali: spreadsheetUrl, spreadsheet_id: spreadsheetId, uploaded_by: 'Admin' });
+      await api.post('/penyelesaian', {
+        id_survei: selectedSurveiId,
+        link_spreadsheet_anomali: spreadsheetUrl,
+        spreadsheet_id: spreadsheetId,
+        Nama: nama,
+        uploaded_by: 'Admin',
+        gabung_dengan_sebelumnya: mergeWithPrevious,
+      });
       setMessage({ type: 'success', text: 'LK berhasil ditambahkan ke survei.' });
       setSelectedSurveiId('');
       setLinkInput('');
       setFileInput(null);
+      setMergeWithPrevious(true);
       fetchData();
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.error || error.message });
@@ -110,6 +124,44 @@ export default function PenyelesaianLK() {
       fetchData();
     } catch (error) {
       alert('Gagal menghapus LK: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const openShare = async (lk) => {
+    setShareModal({ lk, error: '' });
+    setShareLoading(true);
+    try {
+      const response = await api.get(`/penyelesaian/${lk.id}/shares`);
+      setShareLinks(response.data?.shares || response.data || []);
+    } catch (error) {
+      setShareLinks([]);
+      setShareModal((current) => ({ ...current, error: error.response?.data?.error || 'Link berbagi belum dapat dimuat.' }));
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const createShare = async () => {
+    if (!shareModal?.lk) return;
+    setShareLoading(true);
+    try {
+      const response = await api.post(`/penyelesaian/${shareModal.lk.id}/share`, { permission: 'view' });
+      const share = response.data?.share || response.data;
+      setShareLinks((current) => [share, ...current]);
+    } catch (error) {
+      setShareModal((current) => ({ ...current, error: error.response?.data?.error || 'Link berbagi belum berhasil dibuat.' }));
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const revokeShare = async (share) => {
+    if (!window.confirm('Cabut link publik ini?')) return;
+    try {
+      await api.delete(`/penyelesaian/${shareModal.lk.id}/shares/${share.id}`);
+      setShareLinks((current) => current.filter((item) => item.id !== share.id));
+    } catch (error) {
+      alert(error.response?.data?.error || 'Link belum dapat dicabut.');
     }
   };
 
@@ -150,6 +202,9 @@ export default function PenyelesaianLK() {
                 ))}
               </select>
             </label>
+
+            <label className="mt-4 text-sm font-medium text-slate-700">Nama LK </label>
+            <input type="text" placeholder="Nama LK" className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 font-normal" value={nama} onChange={(event) => setNama(event.target.value)} />
             <div className="flex rounded-xl bg-slate-100 p-1 text-sm">
               <button type="button" onClick={() => setInputMode('upload')} className={`flex-1 rounded-lg px-3 py-2 ${inputMode === 'upload' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>
                 <UploadCloud size={16} className="mr-1 inline" />
@@ -160,14 +215,47 @@ export default function PenyelesaianLK() {
                 Link Spreadsheet
               </button>
             </div>
-            {inputMode === 'upload' ? (
-              <input required type="file" accept=".xlsx,.xls" onChange={(event) => setFileInput(event.target.files[0])} className="rounded-xl border border-dashed border-slate-300 p-2 text-sm" />
-            ) : (
-              <input required type="url" placeholder="https://docs.google.com/spreadsheets/d/..." value={linkInput} onChange={(event) => setLinkInput(event.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
-            )}
-            <button disabled={isInjecting} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 lg:col-span-3">
-              {isInjecting ? 'Memproses...' : 'Tambahkan ke survei'}
-            </button>
+
+            <fieldset className="mt-4 rounded-xl border border-slate-200 p-4">
+              <legend className="px-1 text-sm font-semibold text-slate-700">Cara menampilkan LK ini</legend>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <label className={`cursor-pointer rounded-xl border p-3 ${mergeWithPrevious ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+                  <input type="radio" name="lk-merge-mode" checked={mergeWithPrevious} onChange={() => setMergeWithPrevious(true)} className="mr-2 accent-blue-600" />
+                  <span className="text-sm font-semibold text-slate-800">Gabungkan dengan LK sebelumnya</span>
+                  <span className="mt-1 block pl-5 text-xs text-slate-500">Data tampil dalam satu tabel gabungan.</span>
+                </label>
+                <label className={`cursor-pointer rounded-xl border p-3 ${!mergeWithPrevious ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+                  <input type="radio" name="lk-merge-mode" checked={!mergeWithPrevious} onChange={() => setMergeWithPrevious(false)} className="mr-2 accent-blue-600" />
+                  <span className="text-sm font-semibold text-slate-800">Buat LK terpisah</span>
+                  <span className="mt-1 block pl-5 text-xs text-slate-500">Data tersedia di tab LK sendiri.</span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="w-full flex gap-3 my-2 justify-between items-center">
+              {inputMode === 'upload' ? (
+                <UploadDropzone
+                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  files={fileInput}
+                  onFiles={(files) => setFileInput(files[0])}
+                  title="Pilih file Excel"
+                  description="Tarik dan lepas file Excel di sini atau klik untuk memilih"
+                  className="w-full"
+                />
+              ) : (
+                <input
+                  required
+                  type="url"
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  value={linkInput}
+                  onChange={(event) => setLinkInput(event.target.value)}
+                  className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm w-4/5"
+                />
+              )}
+              <button disabled={isInjecting} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 lg:col-span-3">
+                {isInjecting ? 'Memproses...' : 'Tambahkan ke survei'}
+              </button>
+            </div>
           </form>
           {message && (
             <div className={`mx-6 mb-6 flex items-center gap-2 rounded-xl border p-3 text-sm ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
@@ -197,6 +285,9 @@ export default function PenyelesaianLK() {
                 <div className="flex gap-1">
                   {group.items.map((item) => (
                     <span key={item.id} className="flex gap-1">
+                      <button type="button" onClick={() => openShare(item)} title={`Bagikan ${item.nama_lk || item.nama_file || 'LK'}`} className="rounded-lg bg-blue-50 p-2 text-blue-600 hover:bg-blue-100">
+                        <Share2 size={15} />
+                      </button>
                       <button type="button" onClick={() => handleEdit(item)} className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200">
                         Edit
                       </button>
@@ -212,6 +303,44 @@ export default function PenyelesaianLK() {
         ))}
       </section>
       {surveyGroups.length === 0 && <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Belum ada LK yang terhubung.</div>}
+
+      {shareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h2 className="font-bold text-slate-900">Bagikan LK</h2>
+                <p className="text-xs text-slate-500">Penerima dapat melihat data tanpa login.</p>
+              </div>
+              <button type="button" onClick={() => setShareModal(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-3 p-5">
+              <button type="button" onClick={createShare} disabled={shareLoading} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                {shareLoading ? 'Memproses...' : 'Buat link baru'}
+              </button>
+              {shareModal.error && <p className="text-xs text-rose-600">{shareModal.error}</p>}
+              {shareLinks.map((share) => {
+                const token = share.token || share.public_token;
+                const url = share.url || share.public_url || (token ? `${window.location.origin}/penyelesaian/public/${token}` : '');
+                return (
+                  <div key={share.id || url} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2">
+                    <input readOnly value={url} className="min-w-0 flex-1 border-0 bg-transparent text-xs text-slate-600 outline-none" />
+                    <button type="button" onClick={() => navigator.clipboard.writeText(url)} title="Salin link" className="rounded-md bg-slate-100 p-2 text-slate-600">
+                      <Copy size={14} />
+                    </button>
+                    <button type="button" onClick={() => revokeShare(share)} className="text-xs text-rose-600">
+                      Cabut
+                    </button>
+                  </div>
+                );
+              })}
+              {!shareLoading && !shareLinks.length && <p className="text-xs text-slate-400">Belum ada link aktif.</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

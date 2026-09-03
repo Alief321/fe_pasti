@@ -29,8 +29,8 @@ export default function Sidebar({ isCollapsed, onToggle, isAuthenticated }) {
               <Sparkles size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">Monitoring</p>
-              <h1 className="text-lg font-semibold text-slate-900">PASTI</h1>
+              {/* <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400"></p> */}
+              <h1 className="text-lg font-bold text-slate-900">PASTI</h1>
             </div>
           </div>
         )}

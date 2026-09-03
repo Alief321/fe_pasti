@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
-import { Braces, Check, ChevronDown, Clipboard, Code2, Download, FileJson, GitBranch, GripVertical, Layers3, Plus, Search, SlidersHorizontal, Table2, Trash2, Upload, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Braces, Check, ChevronDown, Clipboard, Code2, Download, FileJson, FilePlus2, GitBranch, GripVertical, Layers3, Pencil, Plus, RefreshCw, Search, SlidersHorizontal, Table2, Trash2, Upload, X } from 'lucide-react';
+import api, { API_URL } from '../api';
 
 const starterSchema = {
   version: 1,
@@ -40,11 +41,11 @@ function getQualifiedColumn(value, alias) {
 }
 
 function makeCondition(column = 'umur') {
-  return { id: crypto.randomUUID(), column, operator: '>=', value: '18' };
+  return { id: crypto.randomUUID(), column, operator: '>=', value: '18', enabled: true };
 }
 
-function makeGroup() {
-  return { id: crypto.randomUUID(), logic: 'AND', conditions: [makeCondition()] };
+function makeGroup(column) {
+  return { id: crypto.randomUUID(), logic: 'AND', conditions: [makeCondition(column)] };
 }
 
 function makeExpression(column = 'umur') {
@@ -60,24 +61,257 @@ function getStoredSchema() {
   }
 }
 
+function getSchemaPayload(item) {
+  let payload = item;
+  for (let attempt = 0; attempt < 4 && payload; attempt += 1) {
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        return null;
+      }
+    }
+    if (Array.isArray(payload?.tables)) return payload;
+    payload = payload?.skema_json || payload?.schema || payload?.struktur || payload?.json_schema || payload?.data || payload?.result;
+  }
+  return null;
+}
+
+async function normalizeSchema(item) {
+  let payload = getSchemaPayload(item);
+  if (!payload && item?.file_url) {
+    const response = await fetch(item.file_url);
+    if (!response.ok) throw new Error(`JSON skema gagal dimuat (${response.status}).`);
+    payload = await response.json();
+  }
+  return payload?.tables?.length
+    ? {
+        ...payload,
+        id: item?.id ?? payload.id,
+        id_survei: item?.id_survei ?? item?.survei_id ?? payload.id_survei,
+        name: item?.nama_skema || item?.name || item?.filename || payload.name || 'Skema tanpa nama',
+      }
+    : null;
+}
+
+function getResponseRows(payload) {
+  let current = payload;
+  for (let attempt = 0; attempt < 4 && current; attempt += 1) {
+    if (Array.isArray(current)) return current;
+    if (Array.isArray(current.tables)) return [current];
+    if (Array.isArray(current.data)) return current.data;
+    if (Array.isArray(current.data?.tables)) return [current.data];
+    if (Array.isArray(current.results)) return current.results;
+    if (Array.isArray(current.skema)) return current.skema;
+    current = current.data || current.result;
+  }
+  return [];
+}
+
+function getApiError(error) {
+  const detail = error.response?.data?.error || error.response?.data?.message || error.message;
+  return `${detail} (${API_URL}${error.response ? `, HTTP ${error.response.status}` : ''})`;
+}
+
+function SearchableSelect({ value, onChange, options, placeholder = 'Pilih...', className = '', disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef(null);
+  const normalizedOptions = options.map((option) => (typeof option === 'string' ? { value: option, label: option } : option));
+  const selected = normalizedOptions.find((option) => String(option.value) === String(value));
+  const filteredOptions = normalizedOptions.filter((option) => String(option.label).toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => {
+    function closeOnOutsideClick(event) {
+      if (!containerRef.current?.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, []);
+
+  return (
+    <div ref={containerRef} className={`relative min-w-0 ${className}`}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          setOpen((current) => !current);
+          setQuery('');
+        }}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-left text-xs font-normal text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+      >
+        <span className="min-w-0 truncate">{selected?.label || placeholder}</span>
+        <ChevronDown size={13} className="shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-full min-w-48 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Cari pilihan..."
+              className="w-full rounded-md border border-slate-200 bg-slate-50 py-2 pl-8 pr-2 text-xs outline-none focus:border-cyan-400"
+            />
+          </div>
+          <div className="mt-1 max-h-52 overflow-auto">
+            {filteredOptions.length ? (
+              filteredOptions.map((option) => (
+                <button
+                  key={String(option.value)}
+                  type="button"
+                  onClick={() => {
+                    onChange(option.value);
+                    setOpen(false);
+                  }}
+                  className={`block w-full rounded-md px-2 py-2 text-left text-xs hover:bg-cyan-50 ${String(option.value) === String(value) ? 'bg-cyan-50 font-semibold text-cyan-800' : 'text-slate-700'}`}
+                >
+                  {option.label}
+                </button>
+              ))
+            ) : (
+              <p className="px-2 py-3 text-xs text-slate-400">Tidak ditemukan</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SQLQueryBuilder() {
   const [schema, setSchema] = useState(getStoredSchema);
+  const [schemas, setSchemas] = useState([]);
+  const [surveys, setSurveys] = useState([]);
+  const [selectedSchemaId, setSelectedSchemaId] = useState('local');
+  const [selectedSurveyId, setSelectedSurveyId] = useState('');
+  const [schemaLoading, setSchemaLoading] = useState(true);
+  const [schemaError, setSchemaError] = useState('');
+  const [isSchemaModalOpen, setIsSchemaModalOpen] = useState(false);
+  const [editingSchemaId, setEditingSchemaId] = useState(null);
+  const [schemaForm, setSchemaForm] = useState({ name: '', surveyId: '', json: '' });
+  const [schemaFile, setSchemaFile] = useState(null);
+  const [schemaSaving, setSchemaSaving] = useState(false);
   const [selectedTable, setSelectedTable] = useState(() => getStoredSchema().tables[0].name);
   const [selectedColumns, setSelectedColumns] = useState(['bt.id_penduduk', 'bt.nama_lengkap']);
   const [joins, setJoins] = useState([]);
   const [distinct, setDistinct] = useState(false);
-  const [aggregate, setAggregate] = useState({ function: 'COUNT', column: '*' });
+  const [aggregate, setAggregate] = useState({ function: '', column: '' });
   const [groupBy, setGroupBy] = useState('');
   const [orderBy, setOrderBy] = useState('');
   const [orderDirection, setOrderDirection] = useState('ASC');
   const [limit, setLimit] = useState('');
+  const [offset, setOffset] = useState('');
   const [search, setSearch] = useState('');
+  const [expandedTables, setExpandedTables] = useState(() => ({ [getStoredSchema().tables[0].name]: true }));
   const [groups, setGroups] = useState([makeGroup()]);
   const [caseEnabled, setCaseEnabled] = useState(true);
   const [caseColumn, setCaseColumn] = useState('umur');
   const [expressions, setExpressions] = useState([]);
   const [copied, setCopied] = useState(false);
   const fileInput = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    api
+      .get('/survei')
+      .then((surveyResult) => {
+        if (!mounted) return;
+        setSurveys(getResponseRows(surveyResult.data));
+      })
+      .catch((error) => mounted && setSchemaError(`Survei belum dapat dimuat: ${getApiError(error)}`))
+      .finally(() => mounted && setSchemaLoading(false));
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const request = selectedSurveyId ? `/skema/by-survei/${encodeURIComponent(selectedSurveyId)}` : '/skema';
+    api
+      .get(request)
+      .then(async (response) => {
+        if (!mounted) return;
+        const filteredSchemas = (await Promise.all(getResponseRows(response.data).map((item) => normalizeSchema(item).catch(() => null)))).filter(Boolean);
+        setSchemas(filteredSchemas);
+        if (selectedSurveyId && filteredSchemas[0]) applySchema(filteredSchemas[0], filteredSchemas[0].id);
+      })
+      .catch((error) => mounted && setSchemaError(`Skema belum dapat dimuat: ${getApiError(error)}`))
+      .finally(() => mounted && setSchemaLoading(false));
+    return () => {
+      mounted = false;
+    };
+  }, [selectedSurveyId]);
+
+  function applySchema(nextSchema, id = 'local') {
+    const firstColumn = nextSchema.tables[0].columns[0]?.name || '';
+    setSchema(nextSchema);
+    setSelectedSchemaId(id);
+    setSelectedTable(nextSchema.tables[0].name);
+    setExpandedTables({ [nextSchema.tables[0].name]: true });
+    setSelectedColumns(nextSchema.tables[0].columns.slice(0, 2).map((column) => `bt.${column.name}`));
+    setJoins([]);
+    setGroups([makeGroup(firstColumn)]);
+    setCaseColumn(firstColumn);
+    setAggregate({ function: '', column: '' });
+    setExpressions([]);
+  }
+
+  function changeSurvey(value) {
+    setSchemaLoading(true);
+    setSchemaError('');
+    setSelectedSurveyId(value);
+  }
+
+  function openSchemaModal(item = null) {
+    setEditingSchemaId(item?.id || null);
+    setSchemaFile(null);
+    setSchemaForm({ name: item?.name || '', surveyId: item?.id_survei || item?.survei_id || selectedSurveyId || '', json: JSON.stringify(item ? getSchemaPayload(item) : schema, null, 2) });
+    setIsSchemaModalOpen(true);
+  }
+
+  async function saveServerSchema(event) {
+    event.preventDefault();
+    let parsed;
+    try {
+      parsed = JSON.parse(schemaForm.json);
+      if (!Array.isArray(parsed.tables) || !parsed.tables.length) throw new Error('JSON harus berisi array tables yang tidak kosong.');
+    } catch (error) {
+      window.alert(`JSON skema tidak valid: ${error.message}`);
+      return;
+    }
+    setSchemaSaving(true);
+    try {
+      const formData = new FormData();
+      formData.append('nama_skema', schemaForm.name.trim() || 'Skema baru');
+      formData.append('id_survei', schemaForm.surveyId);
+      formData.append('skema_json', JSON.stringify(parsed));
+      if (schemaFile) formData.append('file', schemaFile);
+      const response = editingSchemaId ? await api.put(`/skema/${editingSchemaId}`, formData) : await api.post('/skema', formData);
+      const saved = (await normalizeSchema(response.data?.data || response.data)) || { ...parsed, id: editingSchemaId, name: schemaForm.name || 'Skema baru' };
+      setSchemas((current) => (editingSchemaId ? current.map((item) => (item.id === editingSchemaId ? saved : item)) : [...current, saved]));
+      setSelectedSurveyId(schemaForm.surveyId);
+      applySchema(saved, saved.id || editingSchemaId || 'local');
+      setIsSchemaModalOpen(false);
+    } catch (error) {
+      window.alert(`Gagal menyimpan skema: ${getApiError(error)}`);
+    } finally {
+      setSchemaSaving(false);
+    }
+  }
+
+  async function deleteServerSchema(item) {
+    if (!item.id || !window.confirm(`Hapus skema "${item.name}"?`)) return;
+    try {
+      await api.delete(`/skema/${item.id}`);
+      setSchemas((current) => current.filter((entry) => entry.id !== item.id));
+      if (selectedSchemaId === item.id) applySchema(starterSchema);
+    } catch (error) {
+      window.alert(`Gagal menghapus skema: ${getApiError(error)}`);
+    }
+  }
 
   const table = schema.tables.find((item) => item.name === selectedTable) || schema.tables[0];
   const joinedTableNames = joins.map((join) => join.table);
@@ -88,11 +322,10 @@ export default function SQLQueryBuilder() {
   const availableJoinTables = schema.tables.filter((item) => item.name !== selectedTable && !joinedTableNames.includes(item.name));
   const sourceTables = [selectedTable, ...joinedTableNames].map((name) => schema.tables.find((item) => item.name === name)).filter(Boolean);
   const sourceColumns = sourceTables.flatMap((source) => source.columns.map((column) => ({ ...column, table: source.name, alias: tableAliases[source.name], qualified: `${tableAliases[source.name]}.${column.name}` })));
-  const filteredColumns = table.columns.filter((column) => column.name.toLowerCase().includes(search.toLowerCase()));
 
   const sql = useMemo(() => {
     const selectFields = selectedColumns.length ? selectedColumns.map((column) => `  ${column}`) : ['  *'];
-    if (aggregate.column)
+    if (aggregate.function && aggregate.column)
       selectFields.push(
         `  ${aggregate.function}(${aggregate.column === '*' ? '*' : getQualifiedColumn(aggregate.column, tableAliases[selectedTable])}) AS ${aggregate.function.toLowerCase()}_${aggregate.column === '*' ? 'rows' : aggregate.column.split('.').pop()}`,
       );
@@ -106,7 +339,8 @@ export default function SQLQueryBuilder() {
         return `,\n  ${expression.function}(${args}) AS ${expression.alias || 'hasil'}`;
       })
       .join('');
-    const whereSql = groups
+    const activeGroups = groups.map((group) => ({ ...group, conditions: group.conditions.filter((condition) => condition.enabled) })).filter((group) => group.conditions.length);
+    const whereSql = activeGroups
       .map(
         (group) =>
           `(${group.conditions.map((condition) => `${getQualifiedColumn(condition.column, tableAliases[selectedTable])} ${condition.operator}${condition.operator === 'IS NULL' ? '' : ` '${condition.value.replaceAll("'", "''")}'`}`).join(` ${group.logic} `)})`,
@@ -116,18 +350,32 @@ export default function SQLQueryBuilder() {
     const groupSql = groupBy ? `\nGROUP BY ${getQualifiedColumn(groupBy, tableAliases[selectedTable])}` : '';
     const orderSql = orderBy ? `\nORDER BY ${getQualifiedColumn(orderBy, tableAliases[selectedTable])} ${orderDirection}` : '';
     const limitSql = limit ? `\nLIMIT ${limit}` : '';
-    return `SELECT\n${selectList}${caseSql}${expressionSql}\nFROM ${selectedTable} ${tableAliases[selectedTable]}${joinSql}\nWHERE ${whereSql}${groupSql}${orderSql}${limitSql};`;
-  }, [aggregate, caseColumn, caseEnabled, distinct, expressions, groupBy, groups, joins, limit, orderBy, orderDirection, selectedColumns, selectedTable, tableAliases]);
+    const offsetSql = offset ? `\nOFFSET ${offset}` : '';
+    return `SELECT\n${selectList}${caseSql}${expressionSql}\nFROM ${selectedTable} ${tableAliases[selectedTable]}${joinSql}${whereSql ? `\nWHERE ${whereSql}` : ''}${groupSql}${orderSql}${limitSql}${offsetSql};`;
+  }, [aggregate, caseColumn, caseEnabled, distinct, expressions, groupBy, groups, joins, limit, offset, orderBy, orderDirection, selectedColumns, selectedTable, tableAliases]);
 
   function toggleColumn(columnName) {
-    const qualified = `${tableAliases[selectedTable]}.${columnName}`;
+    const qualified = columnName.includes('.') ? columnName : `${tableAliases[selectedTable]}.${columnName}`;
     setSelectedColumns((current) => (current.includes(qualified) ? current.filter((column) => column !== qualified) : [...current, qualified]));
+  }
+
+  function reorderSelectedColumn(sourceColumn, targetColumn) {
+    if (!sourceColumn || sourceColumn === targetColumn) return;
+    setSelectedColumns((current) => {
+      const sourceIndex = current.indexOf(sourceColumn);
+      const targetIndex = current.indexOf(targetColumn);
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      const next = [...current];
+      next.splice(sourceIndex, 1);
+      next.splice(targetIndex - (sourceIndex < targetIndex ? 1 : 0), 0, sourceColumn);
+      return next;
+    });
   }
 
   function addDroppedColumn(event) {
     event.preventDefault();
     const columnName = event.dataTransfer.getData('column');
-    const qualified = `${tableAliases[selectedTable]}.${columnName}`;
+    const qualified = columnName.includes('.') ? columnName : `${tableAliases[selectedTable]}.${columnName}`;
     if (columnName && !selectedColumns.includes(qualified)) setSelectedColumns((current) => [...current, qualified]);
   }
 
@@ -166,10 +414,7 @@ export default function SQLQueryBuilder() {
       try {
         const imported = JSON.parse(reader.result);
         if (!Array.isArray(imported.tables) || !imported.tables.length) throw new Error('Format tabel tidak ditemukan');
-        setSchema(imported);
-        setSelectedTable(imported.tables[0].name);
-        const firstAlias = getTableAlias(0);
-        setSelectedColumns(imported.tables[0].columns.slice(0, 2).map((column) => `${firstAlias}.${column.name}`));
+        applySchema(imported);
         localStorage.setItem('sqlab-schema', JSON.stringify(imported));
       } catch (error) {
         window.alert(`Gagal membaca skema: ${error.message}`);
@@ -177,11 +422,6 @@ export default function SQLQueryBuilder() {
     };
     reader.readAsText(file);
     event.target.value = '';
-  }
-
-  function saveSchema() {
-    localStorage.setItem('sqlab-schema', JSON.stringify({ ...schema, savedAt: new Date().toISOString() }));
-    window.alert('Struktur tabel disimpan di browser ini.');
   }
 
   function downloadSchema() {
@@ -211,17 +451,60 @@ export default function SQLQueryBuilder() {
         </div>
         <div className="flex gap-2">
           <input ref={fileInput} type="file" accept=".json,application/json" className="hidden" onChange={importSchema} />
-          <button type="button" onClick={() => fileInput.current?.click()} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-cyan-400">
-            <Upload size={16} /> Import SQLab
+          <button type="button" onClick={() => openSchemaModal()} className="flex items-center gap-2 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
+            <FilePlus2 size={16} /> Skema baru
           </button>
-          <button type="button" onClick={saveSchema} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-cyan-400">
-            <Download size={16} /> Simpan skema
+          <button type="button" onClick={() => fileInput.current?.click()} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-cyan-400">
+            <Upload size={16} /> Import JSON
           </button>
           <button type="button" onClick={downloadSchema} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-cyan-400">
             <Download size={16} /> Export skema
           </button>
         </div>
       </header>
+
+      <section className="mb-5 rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_auto] lg:items-end">
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Skema aktif
+            <SearchableSelect
+              value={selectedSchemaId}
+              onChange={(value) => {
+                const item = schemas.find((entry) => String(entry.id) === String(value));
+                if (item) applySchema(item, item.id);
+              }}
+              options={[{ value: 'local', label: 'Skema lokal / starter' }, ...schemas.map((item) => ({ value: item.id, label: item.name }))]}
+              className="mt-1"
+            />
+          </label>
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Survei tujuan
+            <SearchableSelect value={selectedSurveyId} onChange={changeSurvey} options={[{ value: '', label: 'Tanpa survei' }, ...surveys.map((survey) => ({ value: survey.id, label: survey.nama_survei }))]} className="mt-1" />
+          </label>
+          <div className="flex gap-2">
+            {selectedSchemaId !== 'local' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openSchemaModal(schemas.find((item) => item.id === selectedSchemaId))}
+                  title="Edit skema"
+                  className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:border-cyan-400 hover:text-cyan-700"
+                >
+                  <Pencil size={17} />
+                </button>
+                <button type="button" onClick={() => deleteServerSchema(schemas.find((item) => item.id === selectedSchemaId))} title="Hapus skema" className="rounded-lg border border-slate-200 p-2 text-rose-600 hover:border-rose-300">
+                  <Trash2 size={17} />
+                </button>
+              </>
+            )}
+            <button type="button" onClick={() => window.location.reload()} title="Muat ulang skema" className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:border-cyan-400">
+              <RefreshCw size={17} />
+            </button>
+          </div>
+        </div>
+        {schemaLoading && <p className="mt-2 text-xs text-slate-400">Memuat skema dan survei...</p>}
+        {schemaError && <p className="mt-2 text-xs text-amber-700">{schemaError}</p>}
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(420px,1fr)_390px]">
         <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -252,29 +535,32 @@ export default function SQLQueryBuilder() {
                   onClick={() => {
                     setSelectedTable(item.name);
                     setSelectedColumns([]);
+                    setExpandedTables((current) => ({ ...current, [item.name]: !current[item.name] }));
                   }}
                   className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-bold ${selectedTable === item.name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-700 hover:bg-slate-50'}`}
                 >
                   <span className="flex items-center gap-2">
-                    <ChevronDown size={14} /> {item.name}
+                    <ChevronDown size={14} className={`transition-transform ${expandedTables[item.name] ? '' : '-rotate-90'}`} /> {item.name}
                   </span>
                   <span className="text-[11px] font-normal text-slate-400">{item.columns.length}</span>
                 </button>
-                {selectedTable === item.name && (
+                {expandedTables[item.name] && (
                   <div className="mt-1 space-y-1 pl-2">
-                    {filteredColumns.map((column) => (
-                      <button
-                        type="button"
-                        draggable
-                        onDragStart={(event) => event.dataTransfer.setData('column', column.name)}
-                        onClick={() => toggleColumn(column.name)}
-                        key={column.name}
-                        className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${selectedColumns.includes(`${tableAliases[item.name]}.${column.name}`) ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-                      >
-                        <GripVertical size={13} className="text-slate-300" /> <span className="min-w-0 flex-1 truncate">{column.name}</span>
-                        <span className="text-[10px] text-slate-400">{column.type}</span>
-                      </button>
-                    ))}
+                    {item.columns
+                      .filter((column) => column.name.toLowerCase().includes(search.toLowerCase()))
+                      .map((column) => (
+                        <button
+                          type="button"
+                          draggable
+                          onDragStart={(event) => event.dataTransfer.setData('column', `${tableAliases[item.name]}.${column.name}`)}
+                          onClick={() => toggleColumn(`${tableAliases[item.name]}.${column.name}`)}
+                          key={column.name}
+                          className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${selectedColumns.includes(`${tableAliases[item.name]}.${column.name}`) ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                        >
+                          <GripVertical size={13} className="text-slate-300" /> <span className="min-w-0 flex-1 truncate">{column.name}</span>
+                          <span className="text-[10px] text-slate-400">{column.type}</span>
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>
@@ -292,6 +578,7 @@ export default function SQLQueryBuilder() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">01 / Kolom hasil</p>
                 <h2 className="mt-1 text-lg font-bold text-slate-900">Apa yang ingin ditampilkan?</h2>
+                <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Klik kolom untuk memilihnya. Kolom terpilih akan masuk ke bagian SELECT pada SQL.</p>
               </div>
               <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">{selectedColumns.length} dipilih</span>
             </div>
@@ -299,10 +586,29 @@ export default function SQLQueryBuilder() {
               {selectedColumns.length ? (
                 <div className="flex flex-wrap gap-2">
                   {selectedColumns.map((column) => (
-                    <div key={column} className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+                    <div
+                      key={column}
+                      draggable
+                      onDragStart={(event) => event.dataTransfer.setData('selected-column', column)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        reorderSelectedColumn(event.dataTransfer.getData('selected-column'), column);
+                      }}
+                      className="flex cursor-grab items-center gap-2 rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm active:cursor-grabbing"
+                    >
                       <GripVertical size={14} className="text-cyan-500" />
-                      {column}
-                      <button type="button" onClick={() => toggleColumn(column.split('.').slice(1).join('.'))} aria-label={`Hapus ${column}`} className="text-slate-400 hover:text-rose-500">
+                      <span className="min-w-0 flex-1 truncate">{column}</span>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleColumn(column);
+                        }}
+                        aria-label={`Hapus ${column}`}
+                        className="text-slate-400 hover:text-rose-500"
+                      >
                         <X size={14} />
                       </button>
                     </div>
@@ -320,6 +626,7 @@ export default function SQLQueryBuilder() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">01b / Relasi tabel</p>
                 <h2 className="mt-1 text-lg font-bold text-slate-900">Gabungkan tabel dengan mudah</h2>
+                <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">JOIN mengambil data terkait dari tabel lain. Pilih pasangan kolom yang menjadi penghubungnya.</p>
               </div>
               <button
                 type="button"
@@ -339,54 +646,39 @@ export default function SQLQueryBuilder() {
                 {joins.map((join) => {
                   const joinTable = schema.tables.find((item) => item.name === join.table) || availableJoinTables[0];
                   return (
-                    <div key={join.id} className="grid gap-2 rounded-xl border border-cyan-100 bg-cyan-50/40 p-3 sm:grid-cols-[115px_32px_1fr_1fr_1fr_28px] sm:items-center">
-                      <select value={join.type} onChange={(event) => updateJoin(join.id, 'type', event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold">
-                        {joinTypes.map((type) => (
-                          <option key={type}>{type}</option>
-                        ))}
-                      </select>
+                    <div key={join.id} className="grid min-w-0 gap-2 rounded-xl border border-cyan-100 bg-cyan-50/40 p-3 sm:grid-cols-[minmax(110px,0.8fr)_32px_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_28px] sm:items-center">
+                      <SearchableSelect value={join.type} onChange={(value) => updateJoin(join.id, 'type', value)} options={joinTypes} placeholder="Tipe JOIN" className="text-xs font-semibold" />
                       <span className="hidden text-center text-xs font-bold text-slate-400 sm:block">ON</span>
-                      <select
+                      <SearchableSelect
                         value={`${join.leftTable}.${join.left}`}
-                        onChange={(event) => {
-                          const [leftTable, ...columnParts] = event.target.value.split('.');
+                        onChange={(value) => {
+                          const [leftTable, ...columnParts] = value.split('.');
                           setJoins((current) => current.map((item) => (item.id === join.id ? { ...item, leftTable, left: columnParts.join('.') } : item)));
                         }}
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs"
-                      >
-                        <option value="">Kolom kiri</option>
-                        {sourceColumns.map((column) => (
-                          <option key={`left-${column.qualified}`} value={column.qualified}>
-                            {column.qualified}
-                          </option>
-                        ))}
-                      </select>
-                      <select
+                        options={[{ value: '', label: 'Kolom kiri' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                        placeholder="Kolom kiri"
+                      />
+                      <SearchableSelect
                         value={join.table}
-                        onChange={(event) => {
-                          const nextTable = schema.tables.find((item) => item.name === event.target.value);
+                        onChange={(value) => {
+                          const nextTable = schema.tables.find((item) => item.name === value);
                           if (!nextTable) return;
                           setJoins((current) => current.map((item) => (item.id === join.id ? { ...item, table: nextTable.name, right: nextTable.columns[0].name } : item)));
                         }}
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs"
-                      >
-                        <option value="">Tabel tujuan</option>
-                        {schema.tables
-                          .filter((item) => item.name !== selectedTable && (item.name === join.table || !joinedTableNames.includes(item.name)))
-                          .map((item) => (
-                            <option key={item.name} value={item.name}>
-                              {tableAliases[item.name]} ({item.name})
-                            </option>
-                          ))}
-                      </select>
-                      <select value={join.right} onChange={(event) => updateJoin(join.id, 'right', event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs">
-                        <option value="">Kolom kanan ({tableAliases[join.table]})</option>
-                        {joinTable.columns.map((column) => (
-                          <option key={column.name} value={column.name}>
-                            {tableAliases[join.table]}.{column.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: '', label: 'Tabel tujuan' },
+                          ...schema.tables
+                            .filter((item) => item.name !== selectedTable && (item.name === join.table || !joinedTableNames.includes(item.name)))
+                            .map((item) => ({ value: item.name, label: `${tableAliases[item.name]} (${item.name})` })),
+                        ]}
+                        placeholder="Tabel tujuan"
+                      />
+                      <SearchableSelect
+                        value={join.right}
+                        onChange={(value) => updateJoin(join.id, 'right', value)}
+                        options={[{ value: '', label: `Kolom kanan (${tableAliases[join.table]})` }, ...joinTable.columns.map((column) => ({ value: column.name, label: `${tableAliases[join.table]}.${column.name}` }))]}
+                        placeholder={`Kolom kanan (${tableAliases[join.table]})`}
+                      />
                       <button type="button" onClick={() => setJoins((current) => current.filter((item) => item.id !== join.id))} className="flex items-center justify-center text-slate-400 hover:text-rose-500" aria-label="Hapus JOIN">
                         <Trash2 size={15} />
                       </button>
@@ -402,6 +694,7 @@ export default function SQLQueryBuilder() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">02 / Kondisi</p>
                 <h2 className="mt-1 text-lg font-bold text-slate-900">Saring data bertingkat</h2>
+                <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">WHERE menyaring baris. Tambahkan beberapa kondisi untuk membuat aturan pencarian yang lebih spesifik.</p>
               </div>
               <button type="button" onClick={() => setGroups((current) => [...current, makeGroup()])} className="flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-cyan-700">
                 <Plus size={14} /> Grup kondisi
@@ -412,28 +705,26 @@ export default function SQLQueryBuilder() {
                 <div key={group.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-500">Grup {groupIndex + 1}</span>
-                    <select
+                    <SearchableSelect
                       value={group.logic}
-                      onChange={(event) => setGroups((current) => current.map((item) => (item.id === group.id ? { ...item, logic: event.target.value } : item)))}
-                      className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-bold"
-                    >
-                      <option>AND</option>
-                      <option>OR</option>
-                    </select>
+                      onChange={(value) => setGroups((current) => current.map((item) => (item.id === group.id ? { ...item, logic: value } : item)))}
+                      options={['AND', 'OR']}
+                      className="w-auto text-xs font-bold"
+                    />
                   </div>
                   {group.conditions.map((condition) => (
-                    <div key={condition.id} className="mb-2 grid grid-cols-[1fr_82px_1fr_28px] gap-2 last:mb-0">
-                      <select value={condition.column} onChange={(event) => updateCondition(group.id, condition.id, 'column', event.target.value)} className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs">
-                        <option value="">Pilih kolom</option>
-                        {table.columns.map((column) => (
-                          <option key={column.name}>{column.name}</option>
-                        ))}
-                      </select>
-                      <select value={condition.operator} onChange={(event) => updateCondition(group.id, condition.id, 'operator', event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs">
-                        {operators.map((operator) => (
-                          <option key={operator}>{operator}</option>
-                        ))}
-                      </select>
+                    <div key={condition.id} className="mb-2 grid min-w-0 grid-cols-1 gap-2 last:mb-0 sm:grid-cols-[minmax(0,1fr)_100px_minmax(0,1fr)_32px]">
+                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-500 sm:col-span-4">
+                        <input type="checkbox" checked={condition.enabled} onChange={(event) => updateCondition(group.id, condition.id, 'enabled', event.target.checked)} className="h-4 w-4 accent-cyan-600" />
+                        Gunakan kondisi ini
+                      </label>
+                      <SearchableSelect
+                        value={condition.column}
+                        onChange={(value) => updateCondition(group.id, condition.id, 'column', value)}
+                        options={[{ value: '', label: 'Pilih kolom' }, ...table.columns.map((column) => column.name)]}
+                        placeholder="Pilih kolom"
+                      />
+                      <SearchableSelect value={condition.operator} onChange={(value) => updateCondition(group.id, condition.id, 'operator', value)} options={operators} placeholder="Operator" />
                       <input
                         disabled={condition.operator === 'IS NULL'}
                         value={condition.value}
@@ -460,14 +751,14 @@ export default function SQLQueryBuilder() {
 
           <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5">
             <div className="flex items-start justify-between gap-3">
-              <div className="flex gap-3">
+              <div className="flex min-w-0 gap-3">
                 <div className="rounded-lg bg-amber-100 p-2 text-amber-700">
                   <Braces size={18} />
                 </div>
                 <div>
                   <p className="text-xs font-bold uppercase tracking-widest text-amber-700">03 / Logika lanjutan</p>
                   <h2 className="mt-1 text-lg font-bold text-slate-900">Buat kategori dengan CASE</h2>
-                  <p className="mt-1 text-xs text-slate-600">Contoh: kelompokkan umur menjadi Dewasa atau Belum dewasa.</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">CASE membuat label yang mudah dibaca dari aturan sederhana, misalnya umur menjadi Dewasa atau Belum dewasa.</p>
                 </div>
               </div>
               <button type="button" onClick={() => setCaseEnabled((current) => !current)} className={`relative h-6 w-11 rounded-full transition ${caseEnabled ? 'bg-amber-500' : 'bg-slate-300'}`} aria-label="Aktifkan CASE">
@@ -475,15 +766,9 @@ export default function SQLQueryBuilder() {
               </button>
             </div>
             {caseEnabled && (
-              <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-white p-3 text-xs">
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-white p-3 text-xs">
                 <span className="font-semibold text-slate-500">Jika</span>
-                <select value={caseColumn} onChange={(event) => setCaseColumn(event.target.value)} className="rounded border border-slate-200 px-2 py-1">
-                  {sourceColumns.map((column) => (
-                    <option key={column.qualified} value={column.qualified}>
-                      {column.qualified}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect value={caseColumn} onChange={setCaseColumn} options={sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))} placeholder="Pilih kolom" className="w-auto" />
                 <span className="text-slate-500">
                   ≥ 18 maka <b>Dewasa</b>, selain itu <b>Belum dewasa</b>
                 </span>
@@ -496,7 +781,7 @@ export default function SQLQueryBuilder() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-cyan-700">03b / Ekspresi hasil</p>
                 <h2 className="mt-1 text-lg font-bold text-slate-900">Gabungkan dan rapikan nilai</h2>
-                <p className="mt-1 text-xs text-slate-600">Pilih fungsi, kolom, lalu beri nama hasilnya. SQL akan dirangkai otomatis.</p>
+                <p className="mt-1 max-w-xl text-xs leading-5 text-slate-600">Fungsi seperti COALESCE atau LOWER mengolah nilai sebelum ditampilkan. Nama hasil membantu membaca kolom baru.</p>
               </div>
               <button
                 type="button"
@@ -511,32 +796,21 @@ export default function SQLQueryBuilder() {
             ) : (
               <div className="space-y-3">
                 {expressions.map((expression) => (
-                  <div key={expression.id} className="grid gap-2 rounded-xl border border-cyan-100 bg-white p-3 sm:grid-cols-[125px_1fr_1fr_1fr_28px] sm:items-center">
-                    <select value={expression.function} onChange={(event) => updateExpression(expression.id, 'function', event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-semibold">
-                      {expressionFunctions.map((fn) => (
-                        <option key={fn}>{fn}</option>
-                      ))}
-                    </select>
-                    <select value={expression.column} onChange={(event) => updateExpression(expression.id, 'column', event.target.value)} className="min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-xs">
-                      {sourceColumns.map((column) => (
-                        <option key={`expression-${expression.id}-${column.qualified}`} value={column.qualified}>
-                          {column.qualified}
-                        </option>
-                      ))}
-                    </select>
-                    <select
+                  <div key={expression.id} className="grid min-w-0 gap-2 rounded-xl border border-cyan-100 bg-white p-3 sm:grid-cols-[125px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_28px] sm:items-center">
+                    <SearchableSelect value={expression.function} onChange={(value) => updateExpression(expression.id, 'function', value)} options={expressionFunctions} placeholder="Fungsi" className="text-xs font-semibold" />
+                    <SearchableSelect
+                      value={expression.column}
+                      onChange={(value) => updateExpression(expression.id, 'column', value)}
+                      options={sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))}
+                      placeholder="Kolom"
+                    />
+                    <SearchableSelect
                       value={expression.secondColumn}
-                      onChange={(event) => updateExpression(expression.id, 'secondColumn', event.target.value)}
+                      onChange={(value) => updateExpression(expression.id, 'secondColumn', value)}
                       disabled={['LOWER', 'UPPER', 'DATE_TRUNC'].includes(expression.function)}
-                      className="min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-xs disabled:bg-slate-100"
-                    >
-                      <option value="">Nilai fallback / kolom kedua</option>
-                      {sourceColumns.map((column) => (
-                        <option key={`fallback-${expression.id}-${column.qualified}`} value={column.qualified}>
-                          {column.qualified}
-                        </option>
-                      ))}
-                    </select>
+                      options={[{ value: '', label: 'Nilai fallback / kolom kedua' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                      placeholder="Nilai fallback / kolom kedua"
+                    />
                     <input
                       value={expression.alias}
                       onChange={(event) => updateExpression(expression.id, 'alias', event.target.value.replace(/[^a-zA-Z0-9_]/g, '_'))}
@@ -573,58 +847,59 @@ export default function SQLQueryBuilder() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-slate-400">04 / Query lanjutan</p>
                 <h2 className="mt-1 text-lg font-bold text-slate-900">Kontrol hasil dan ringkasan</h2>
+                <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Atur data unik, ringkasan, pengurutan, dan jumlah halaman hasil tanpa menulis klausa SQL.</p>
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 p-3 text-sm font-semibold text-slate-700">
                 <input type="checkbox" checked={distinct} onChange={(event) => setDistinct(event.target.checked)} className="h-4 w-4 accent-cyan-600" /> Hanya data unik (DISTINCT)
               </label>
-              <label className="flex items-center gap-2 rounded-lg border border-slate-200 p-3 text-xs font-semibold text-slate-600">
+              <label className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3 text-xs font-semibold text-slate-600">
                 Agregasi
-                <select value={aggregate.function} onChange={(event) => setAggregate((current) => ({ ...current, function: event.target.value }))} className="rounded border border-slate-200 bg-white px-2 py-1 text-xs">
-                  {aggregateFunctions.map((fn) => (
-                    <option key={fn}>{fn}</option>
-                  ))}
-                </select>
-                <select value={aggregate.column} onChange={(event) => setAggregate((current) => ({ ...current, column: event.target.value }))} className="ml-auto max-w-32.5 rounded border border-slate-200 bg-white px-2 py-1 text-xs">
-                  <option value="">Tidak ada</option>
-                  <option value="*">Semua baris (*)</option>
-                  {sourceColumns.map((column) => (
-                    <option key={column.qualified} value={column.qualified}>
-                      {column.qualified}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={aggregate.function}
+                  onChange={(value) => setAggregate((current) => ({ ...current, function: value }))}
+                  options={[{ value: '', label: 'Tidak ada' }, ...aggregateFunctions.map((fn) => ({ value: fn, label: fn }))]}
+                  placeholder="Fungsi agregat"
+                  className="w-auto"
+                />
+                <SearchableSelect
+                  value={aggregate.column}
+                  onChange={(value) => setAggregate((current) => ({ ...current, column: value }))}
+                  options={[{ value: '', label: 'Tidak ada' }, { value: '*', label: 'Semua baris (*)' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                  placeholder="Kolom agregat"
+                  className="ml-auto max-w-40"
+                  disabled={!aggregate.function}
+                />
               </label>
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <label className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
                 Kelompokkan
-                <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)} className="ml-auto flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 font-normal">
-                  <option value="">Tidak ada</option>
-                  {sourceColumns.map((column) => (
-                    <option key={`group-${column.qualified}`} value={column.qualified}>
-                      {column.qualified}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={groupBy}
+                  onChange={setGroupBy}
+                  options={[{ value: '', label: 'Tidak ada' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                  placeholder="Tidak ada"
+                  className="ml-auto flex-1"
+                />
               </label>
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <label className="flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
                 Urutkan
-                <select value={orderBy} onChange={(event) => setOrderBy(event.target.value)} className="ml-auto flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 font-normal">
-                  <option value="">Tidak ada</option>
-                  {sourceColumns.map((column) => (
-                    <option key={`order-${column.qualified}`} value={column.qualified}>
-                      {column.qualified}
-                    </option>
-                  ))}
-                </select>
-                <select value={orderDirection} onChange={(event) => setOrderDirection(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-2">
-                  <option>ASC</option>
-                  <option>DESC</option>
-                </select>
+                <SearchableSelect
+                  value={orderBy}
+                  onChange={setOrderBy}
+                  options={[{ value: '', label: 'Tidak ada' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                  placeholder="Tidak ada"
+                  className="ml-auto flex-1"
+                />
+                <SearchableSelect value={orderDirection} onChange={setOrderDirection} options={['ASC', 'DESC']} placeholder="Arah" className="w-auto" />
               </label>
               <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                 Batas baris
                 <input type="number" min="1" value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="Semua" className="ml-auto w-28 rounded-lg border border-slate-200 px-3 py-2 font-normal" />
+              </label>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                Mulai dari baris
+                <input type="number" min="0" value={offset} onChange={(event) => setOffset(event.target.value)} placeholder="0" className="ml-auto w-28 rounded-lg border border-slate-200 px-3 py-2 font-normal" />
               </label>
             </div>
           </div>
@@ -649,6 +924,80 @@ export default function SQLQueryBuilder() {
           <div className="border-t border-slate-700 bg-slate-900/60 px-5 py-4 text-xs text-slate-400">Query ini siap ditempel ke SQLab atau disimpan sebagai pemeriksaan baru.</div>
         </aside>
       </div>
+      {isSchemaModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-4">
+              <div>
+                <h2 className="font-bold text-slate-900">{editingSchemaId ? 'Edit skema' : 'Upload skema baru'}</h2>
+                <p className="text-xs text-slate-500">Tempel JSON struktur tabel, lalu simpan ke database.</p>
+              </div>
+              <button type="button" onClick={() => setIsSchemaModalOpen(false)} className="text-slate-400 hover:text-slate-700" aria-label="Tutup">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={saveServerSchema} className="min-h-0 space-y-4 overflow-y-auto p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-slate-700">
+                  Nama skema
+                  <input
+                    required
+                    value={schemaForm.name}
+                    onChange={(event) => setSchemaForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Contoh: Skema Penduduk 2026"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-normal outline-none focus:border-cyan-400"
+                  />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">
+                  Survei
+                  <SearchableSelect
+                    required
+                    value={schemaForm.surveyId}
+                    onChange={(value) => setSchemaForm((current) => ({ ...current, surveyId: value }))}
+                    options={[{ value: '', label: 'Pilih survei' }, ...surveys.map((survey) => ({ value: survey.id, label: survey.nama_survei }))]}
+                    placeholder="Pilih survei"
+                    className="mt-1 w-full font-normal"
+                  />
+                </label>
+              </div>
+              <label className="block text-sm font-semibold text-slate-700">
+                File JSON (opsional)
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    setSchemaFile(file || null);
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => setSchemaForm((current) => ({ ...current, name: current.name || file.name.replace(/\.json$/i, ''), json: String(reader.result) }));
+                    reader.readAsText(file);
+                  }}
+                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-normal text-slate-600"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                JSON skema
+                <textarea
+                  required
+                  rows={14}
+                  value={schemaForm.json}
+                  onChange={(event) => setSchemaForm((current) => ({ ...current, json: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-950 p-3 font-mono text-xs leading-5 text-cyan-100 outline-none focus:border-cyan-400"
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setIsSchemaModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                  Batal
+                </button>
+                <button type="submit" disabled={schemaSaving} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-50">
+                  {schemaSaving ? 'Menyimpan...' : 'Simpan ke database'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

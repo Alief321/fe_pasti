@@ -8,6 +8,7 @@ import DaftarSurvei from './pages/DaftarSurvei';
 import DaftarAnomali from './pages/DaftarAnomali';
 import PenyelesaianLK from './pages/PenyelesaianLK';
 import PenyelesaianDetail from './pages/PenyelesaianDetail';
+import PenyelesaianPublic from './pages/PenyelesaianPublic';
 import SQLQueryBuilder from './pages/SQLQueryBuilder';
 import LoginPage from './pages/LoginPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -29,7 +30,7 @@ function AppLayout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const location = useLocation();
   const authenticated = isAuthenticated();
-  const isAuthRoute = ['/login', '/forgot-password', '/reset-password', '/logout'].includes(location.pathname);
+  const isAuthRoute = ['/login', '/forgot-password', '/reset-password', '/logout'].includes(location.pathname) || location.pathname.startsWith('/penyelesaian/public/');
 
   if (isAuthRoute) {
     return (
@@ -41,6 +42,7 @@ function AppLayout() {
         <Route path="/penyelesaian" element={<PenyelesaianLK />} />
         <Route path="/penyelesaian/survei/:surveiId" element={<PenyelesaianDetail />} />
         <Route path="/penyelesaian/:spreadsheetId" element={<PenyelesaianDetail />} />
+        <Route path="/penyelesaian/public/:token" element={<PenyelesaianPublic />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -67,6 +69,7 @@ function AppLayout() {
             <Route path="/penyelesaian" element={<PenyelesaianLK />} />
             <Route path="/penyelesaian/survei/:surveiId" element={<PenyelesaianDetail />} />
             <Route path="/penyelesaian/:spreadsheetId" element={<PenyelesaianDetail />} />
+            <Route path="/penyelesaian/public/:token" element={<PenyelesaianPublic />} />
             <Route
               path="/survei"
               element={
