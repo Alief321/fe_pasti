@@ -32,6 +32,9 @@ export default function PenyelesaianLK() {
   const [nama, setNama] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [surveyFilter, setSurveyFilter] = useState('ALL');
+  const [editingLk, setEditingLk] = useState(null);
+  const [editForm, setEditForm] = useState({ id_survei: '', Nama: '', link_spreadsheet_anomali: '', gabung_dengan_id: '' });
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -124,19 +127,24 @@ export default function PenyelesaianLK() {
       if (missingColumnsBySheet.length > 0) {
         await Promise.all(missingColumnsBySheet.map(({ sheetName, columns }) => api.post('/sheets/inject-columns', { spreadsheetId, spreadsheetUrl, sheetName, columns, onlyMissing: true })));
       }
+      const mergeTarget = mergeWithPrevious ? mergeTargetId : null;
+      if (mergeWithPrevious && !mergeTarget) throw new Error('Pilih LK tujuan untuk penggabungan terlebih dahulu.');
+      const mergeTargetIdValue = mergeTarget && Number.isFinite(Number(mergeTarget)) ? Number(mergeTarget) : mergeTarget;
+      const normalizedName = nama.trim();
       await api.post('/penyelesaian', {
         id_survei: selectedSurveiId,
         link_spreadsheet_anomali: spreadsheetUrl,
         spreadsheet_id: spreadsheetId,
-        Nama: nama,
+        Nama: normalizedName,
+        nama_lk: normalizedName,
         uploaded_by: 'Admin',
-        gabung_dengan_sebelumnya: mergeWithPrevious,
-        gabung_dengan_id: mergeWithPrevious ? mergeTargetId || selectedSurveyLks.at(-1)?.id || null : null,
+        gabung_dengan_id: mergeTargetIdValue || null,
       });
       setMessage({ type: 'success', text: 'LK berhasil ditambahkan ke survei.' });
       setSelectedSurveiId('');
       setLinkInput('');
       setFileInput(null);
+      setNama('');
       setMergeWithPrevious(false);
       setMergeTargetId('');
       fetchData();
@@ -147,15 +155,40 @@ export default function PenyelesaianLK() {
     }
   };
 
-  const handleEdit = async (lk) => {
-    const link = window.prompt('Masukkan link Spreadsheet baru:', lk.link_spreadsheet_anomali || '');
-    if (!link || link === lk.link_spreadsheet_anomali) return;
+  const openEdit = (lk) => {
+    setEditingLk(lk);
+    setEditForm({
+      id_survei: String(lk.id_survei || lk.daftar_survei?.id || ''),
+      Nama: lk.Nama || lk.nama_lk || lk.nama_file || lk.file_name || '',
+      link_spreadsheet_anomali: lk.link_spreadsheet_anomali || '',
+      gabung_dengan_id: lk.gabung_dengan_id ? String(lk.gabung_dengan_id) : '',
+    });
+  };
+
+  const editSurveyLks = editingLk ? lks.filter((lk) => String(lk.id_survei || lk.daftar_survei?.id) === String(editForm.id_survei) && String(lk.id) !== String(editingLk.id)) : [];
+
+  const handleEditSubmit = async (event) => {
+    event.preventDefault();
+    const mergeTarget = editForm.gabung_dengan_id;
+    if (!editForm.id_survei || !editForm.Nama.trim() || !editForm.link_spreadsheet_anomali.trim()) return;
+    const mergeTargetIdValue = mergeTarget && Number.isFinite(Number(mergeTarget)) ? Number(mergeTarget) : mergeTarget;
+    setIsSavingEdit(true);
     try {
-      const namaLk = window.prompt('Masukkan nama LK:', lk.Nama || lk.nama_lk || lk.nama_file || '');
-      await api.put(`/penyelesaian/${lk.id}`, { link_spreadsheet_anomali: link, Nama: namaLk || undefined });
-      fetchData();
+      const normalizedName = editForm.Nama.trim();
+      await api.put(`/penyelesaian/${editingLk.id}`, {
+        id_survei: editForm.id_survei,
+        link_spreadsheet_anomali: editForm.link_spreadsheet_anomali.trim(),
+        Nama: normalizedName,
+        nama_lk: normalizedName,
+        gabung_dengan_id: mergeTargetIdValue || null,
+      });
+      setEditingLk(null);
+      setMessage({ type: 'success', text: 'Data LK berhasil diperbarui.' });
+      await fetchData();
     } catch (error) {
-      alert('Gagal memperbarui LK: ' + (error.response?.data?.error || error.message));
+      setMessage({ type: 'error', text: error.response?.data?.error || 'Gagal memperbarui LK.' });
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -182,6 +215,90 @@ export default function PenyelesaianLK() {
           <p className="mt-1 text-3xl font-bold">{surveyGroups.length}</p>
         </div>
       </header>
+
+      {editingLk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <form onSubmit={handleEditSubmit} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Edit data LK</h2>
+                <p className="mt-1 text-sm text-slate-500">Perbarui seluruh metadata LK dan cara penggabungannya.</p>
+              </div>
+              <button type="button" onClick={() => setEditingLk(null)} className="text-sm font-semibold text-slate-500 hover:text-slate-800">
+                Tutup
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Survei
+                <select
+                  required
+                  value={editForm.id_survei}
+                  onChange={(event) => setEditForm((current) => ({ ...current, id_survei: event.target.value, gabung_dengan_id: '' }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 font-normal"
+                >
+                  <option value="" disabled>
+                    Pilih survei
+                  </option>
+                  {surveiList.map((survey) => (
+                    <option key={survey.id} value={survey.id}>
+                      {survey.nama_survei}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-medium text-slate-700">
+                Nama LK
+                <input
+                  required
+                  value={editForm.Nama}
+                  onChange={(event) => setEditForm((current) => ({ ...current, Nama: event.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 font-normal"
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-slate-700">
+                Link Spreadsheet
+                <input
+                  required
+                  type="url"
+                  value={editForm.link_spreadsheet_anomali}
+                  onChange={(event) => setEditForm((current) => ({ ...current, link_spreadsheet_anomali: event.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 font-normal"
+                />
+              </label>
+
+              <fieldset className="rounded-xl border border-slate-200 p-4">
+                <legend className="px-1 text-sm font-semibold text-slate-700">Cara menampilkan LK ini</legend>
+                <p className="mt-2 text-xs text-slate-500">Pilih LK tujuan. Kosongkan jika LK ini berdiri sendiri.</p>
+                <select
+                  value={editForm.gabung_dengan_id}
+                  onChange={(event) => setEditForm((current) => ({ ...current, gabung_dengan_id: event.target.value }))}
+                  className="mt-3 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-normal text-slate-700"
+                >
+                  <option value="">Tidak digabungkan</option>
+                  {editSurveyLks.map((lk) => (
+                    <option key={lk.id} value={lk.id}>
+                      {lk.Nama || lk.nama_lk || lk.nama_file || lk.file_name || `LK ${lk.id}`}
+                    </option>
+                  ))}
+                </select>
+              </fieldset>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" onClick={() => setEditingLk(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">
+                Batal
+              </button>
+              <button type="submit" disabled={isSavingEdit} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                {isSavingEdit ? 'Menyimpan...' : 'Simpan perubahan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <section className="sticky top-3 z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
         <div className="relative min-w-60 flex-1">
@@ -245,29 +362,23 @@ export default function PenyelesaianLK() {
             </div>
 
             <fieldset className="mt-4 rounded-xl border border-slate-200 p-4">
-              <legend className="px-1 text-sm font-semibold text-slate-700">Cara menampilkan LK ini</legend>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <label className={`cursor-pointer rounded-xl border p-3 ${mergeWithPrevious ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
-                  <input type="radio" name="lk-merge-mode" checked={mergeWithPrevious} onChange={() => setMergeWithPrevious(true)} className="mr-2 accent-blue-600" />
-                  <span className="text-sm font-semibold text-slate-800">Gabungkan ke LK tertentu</span>
-                  <span className="mt-1 block pl-5 text-xs text-slate-500">Pilih LK tujuan. Jika tidak dipilih, LK ini masuk ke LK terakhir.</span>
-                  {mergeWithPrevious && selectedSurveyLks.length > 0 && (
-                    <select value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} className="mt-3 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-xs font-normal text-slate-700">
-                      <option value="">LK terakhir dalam survei</option>
-                      {selectedSurveyLks.map((lk) => (
-                        <option key={lk.id} value={lk.id}>
-                          {lk.nama_lk || lk.nama_file || lk.file_name || `LK ${lk.id}`}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-                <label className={`cursor-pointer rounded-xl border p-3 ${!mergeWithPrevious ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
-                  <input type="radio" name="lk-merge-mode" checked={!mergeWithPrevious} onChange={() => setMergeWithPrevious(false)} className="mr-2 accent-blue-600" />
-                  <span className="text-sm font-semibold text-slate-800">Jangan gabungkan</span>
-                  <span className="mt-1 block pl-5 text-xs text-slate-500">LK ini tetap berdiri sendiri dan muncul di daftar survei.</span>
-                </label>
-              </div>
+              <legend className="px-1 text-sm font-semibold text-slate-700">Gabungkan ke LK</legend>
+              <p className="mt-1 text-xs text-slate-500">Pilih LK tujuan secara langsung. Kosongkan jika LK ini berdiri sendiri.</p>
+              <select
+                value={mergeTargetId}
+                onChange={(event) => {
+                  setMergeTargetId(event.target.value);
+                  setMergeWithPrevious(Boolean(event.target.value));
+                }}
+                className="mt-3 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-normal text-slate-700"
+              >
+                <option value="">Tidak digabungkan</option>
+                {selectedSurveyLks.map((lk) => (
+                  <option key={lk.id} value={lk.id}>
+                    {lk.Nama || lk.nama_lk || lk.nama_file || lk.file_name || `LK ${lk.id}`}
+                  </option>
+                ))}
+              </select>
             </fieldset>
 
             <div className="w-full flex gap-3 my-2 justify-between items-center">
@@ -320,11 +431,11 @@ export default function PenyelesaianLK() {
                 <div key={`${group.id}-${item.id || item.spreadsheet_id || 'lk'}-${itemIndex}`} className="flex items-center justify-between gap-3">
                   <span className="min-w-0 truncate text-sm font-semibold text-slate-700">{item.Nama || item.nama_lk || item.name || item.nama_file || `LK ${item.id}`}</span>
                   <div className="flex shrink-0 items-center gap-1">
-                    <Link to={`/penyelesaian/${item.spreadsheet_id}`} title="Buka link detail tanpa login" className="rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50">
+                    <Link to={`/penyelesaian/${item.id}`} title="Buka link detail tanpa login" className="rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50">
                       Buka detail
                     </Link>
                     {authenticated && (
-                      <button type="button" onClick={() => handleEdit(item)} title="Edit LK" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+                      <button type="button" onClick={() => openEdit(item)} title="Edit LK" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
                         <Pencil size={15} />
                       </button>
                     )}

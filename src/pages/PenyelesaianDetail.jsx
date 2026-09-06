@@ -128,6 +128,60 @@ const getSheetSources = (worksheetPayload) => {
   });
 };
 
+const getMergeGroupId = (record, recordsById) => {
+  const visited = new Set();
+  let current = record;
+  while (current?.gabung_dengan_id) {
+    const currentId = String(current.id || current.spreadsheet_id);
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+    const target = recordsById.get(String(current.gabung_dengan_id));
+    if (!target) break;
+    current = target;
+  }
+  return String(current?.id || current?.spreadsheet_id || record.spreadsheet_id);
+};
+
+const getRecordFromResponse = (payload) => {
+  const value = payload?.data ?? payload?.penyelesaian ?? payload;
+  if (Array.isArray(value)) return value[0];
+  return value && typeof value === 'object' ? value : null;
+};
+
+const recordMatchesReference = (record, reference) => String(record?.id) === String(reference) || String(record?.spreadsheet_id) === String(reference);
+
+async function getPenyelesaianRecord(reference) {
+  try {
+    const response = await api.get(`/penyelesaian/${encodeURIComponent(reference)}`);
+    const record = getRecordFromResponse(response.data);
+    if (recordMatchesReference(record, reference)) return record;
+  } catch {
+    // Fallback below supports public URLs that contain spreadsheet_id.
+  }
+
+  const response = await api.get('/penyelesaian');
+  const records = Array.isArray(response.data) ? response.data : response.data?.data || response.data?.penyelesaian || [];
+  return records.find((record) => recordMatchesReference(record, reference)) || null;
+}
+
+async function getRelatedPenyelesaianRecords(primaryRecord) {
+  const records = [];
+  const visited = new Set();
+  let current = primaryRecord;
+
+  while (current) {
+    const recordKey = String(current.id ?? current.spreadsheet_id);
+    if (visited.has(recordKey)) break;
+    visited.add(recordKey);
+    records.push(current);
+
+    if (!current.gabung_dengan_id) break;
+    current = await getPenyelesaianRecord(current.gabung_dengan_id);
+  }
+
+  return records;
+}
+
 export default function PenyelesaianDetail() {
   const { surveiId, spreadsheetId } = useParams();
   const navigate = useNavigate();
@@ -179,13 +233,10 @@ export default function PenyelesaianDetail() {
           const response = await api.get('/penyelesaian');
           records = response.data.filter((item) => String(item.id_survei || item.daftar_survei?.id) === String(surveiId));
         } else {
-          try {
-            const response = await api.get('/penyelesaian');
-            const matchingRecord = response.data.find((item) => String(item.spreadsheet_id) === String(spreadsheetId));
-            records = matchingRecord ? [matchingRecord] : [{ spreadsheet_id: spreadsheetId, uploaded_by: 'LK' }];
-          } catch {
-            records = [{ spreadsheet_id: spreadsheetId, uploaded_by: 'LK' }];
-          }
+          const primaryRecord = await getPenyelesaianRecord(spreadsheetId);
+          records = primaryRecord ? await getRelatedPenyelesaianRecords(primaryRecord) : [];
+
+          if (!records.length) throw new Error('Data LK tidak ditemukan.');
         }
 
         const resolvedMappingIds = records
@@ -196,12 +247,11 @@ export default function PenyelesaianDetail() {
         setMappingIds(resolvedMappingIds.length ? resolvedMappingIds : publicMappingId ? [publicMappingId] : []);
         setMappingId(resolvedMappingIds[0] || publicMappingId);
 
-        let separateGroup = 0;
+        const recordsById = new Map(records.filter((record) => record.id != null).map((record) => [String(record.id), record]));
         const loadedSources = await Promise.all(
           records.map(async (record, recordIndex) => {
-            const isSeparate = record.gabung_dengan_sebelumnya === false || record.gabung_dengan_sebelumnya === 'false';
-            if (recordIndex > 0 && isSeparate) separateGroup += 1;
-            const groupId = `group-${separateGroup}`;
+            const groupId = `group-${getMergeGroupId(record, recordsById) || recordIndex}`;
+            const sourceLabel = record.Nama || record.nama_lk || record.nama_file || record.file_name || `LK ${recordIndex + 1}`;
             let response = await api.get(`/sheets/data/${record.spreadsheet_id}`);
             let sheetItems = getSheetSources(response.data || {});
             const missingColumnsBySheet = sheetItems
@@ -234,7 +284,7 @@ export default function PenyelesaianDetail() {
               sourceKey: `${record.spreadsheet_id}::${sheetItem.sheetName || `Sheet${index + 1}`}`,
               spreadsheetId: record.spreadsheet_id,
               sheetName: sheetItem.sheetName || `Sheet${index + 1}`,
-              label: record.nama_lk || record.nama_file || record.file_name || `LK ${recordIndex + 1}`,
+              label: sourceLabel,
               groupId,
               headers: sheetItem.headers || [],
               data: sheetItem.data || [],
@@ -288,6 +338,7 @@ export default function PenyelesaianDetail() {
             if (mappingMeta.date_column) setDateColumnChoice(mappingMeta.date_column);
             if (mappingMeta.note_column) setNoteColumnChoice(mappingMeta.note_column);
             if (Array.isArray(mappingMeta.note_templates) && mappingMeta.note_templates.length) setNoteTemplates(mappingMeta.note_templates);
+            if (Array.isArray(mappingMeta.hidden_columns)) setHiddenColumns(mappingMeta.hidden_columns);
             if (Array.isArray(mappingMeta.selected_sheet_keys)) {
               const availableKeys = new Set(allSources.map((source) => source.sourceKey));
               setSelectedSheetKeys(mappingMeta.selected_sheet_keys.filter((key) => availableKeys.has(key)));
@@ -309,6 +360,7 @@ export default function PenyelesaianDetail() {
                 if (localMeta.date_column) setDateColumnChoice(localMeta.date_column);
                 if (localMeta.note_column) setNoteColumnChoice(localMeta.note_column);
                 if (Array.isArray(localMeta.note_templates) && localMeta.note_templates.length) setNoteTemplates(localMeta.note_templates);
+                if (Array.isArray(localMeta.hidden_columns)) setHiddenColumns(localMeta.hidden_columns);
                 if (Array.isArray(localMeta.selected_sheet_keys)) {
                   const availableKeys = new Set(allSources.map((source) => source.sourceKey));
                   setSelectedSheetKeys(localMeta.selected_sheet_keys.filter((key) => availableKeys.has(key)));
@@ -341,6 +393,7 @@ export default function PenyelesaianDetail() {
       date_column: dateColumnChoice || effectiveDateHeader,
       note_column: noteColumnChoice,
       note_templates: noteTemplates,
+      hidden_columns: hiddenColumns,
       selected_sheet_keys: selectedSheetKeys,
       source_group: sourceGroup,
     };
@@ -376,14 +429,9 @@ export default function PenyelesaianDetail() {
 
   const headers = useMemo(() => [...new Set(sources.flatMap((source) => source.headers.map((header) => columnMappings[source.sourceKey]?.[header] || header)))], [columnMappings, sources]);
   const sheetOptions = useMemo(() => sources.map((source) => ({ key: source.sourceKey, label: `${source.label} / ${source.sheetName}` })), [sources]);
-  const sourceGroups = useMemo(() => {
-    const groups = [...new Set(sources.map((source) => source.groupId))];
-    return groups.map((groupId, index) => ({ groupId, label: sources.find((source) => source.groupId === groupId)?.label || `LK ${index + 1}` }));
-  }, [sources]);
   const activeSources = useMemo(() => {
-    const groupedSources = sourceGroup === 'ALL' ? sources : sources.filter((source) => source.groupId === sourceGroup);
-    return groupedSources.filter((source) => selectedSheetKeys.includes(source.sourceKey));
-  }, [selectedSheetKeys, sourceGroup, sources]);
+    return sources.filter((source) => selectedSheetKeys.includes(source.sourceKey));
+  }, [selectedSheetKeys, sources]);
   const mergeMappings = useMemo(() => ({ ...columnMappings, ...Object.fromEntries(Object.entries(keyMappings).map(([sourceKey, value]) => [`${sourceKey}::key`, value])) }), [columnMappings, keyMappings]);
   const merged = useMemo(() => mergeLkRows(activeSources, selectedKey, mergeMappings), [activeSources, mergeMappings, selectedKey]);
   const detectedStatusColumns = useMemo(() => detectStatusColumns(headers, merged.rows), [headers, merged.rows]);
@@ -514,7 +562,7 @@ export default function PenyelesaianDetail() {
             sheetName: row._sourceSheetName,
             dataIndex: row._sourceDataIndex ?? row._rowIndex,
             rowIndex: row._sourceRowIndex ?? row._sourceDataIndex ?? row._rowIndex,
-            sheetRowNumber: row._sheetRowNumber ?? (row._sourceRowIndex ?? row._sourceDataIndex ?? row._rowIndex) + 1,
+            sheetRowNumber: row._sheetRowNumber ?? row._sourceRowIndex ?? row._sourceDataIndex ?? row._rowIndex,
           },
         ];
     const updates = sourceRows.map((sourceRow) => {
@@ -575,7 +623,7 @@ export default function PenyelesaianDetail() {
           api.post('/sheets/update-row', {
             spreadsheetId: source.spreadsheetId,
             sheetName: source.sheetName,
-            rowIndex: sourceRow.sheetRowNumber,
+            rowIndex: sourceRow.rowIndex,
             dataRowIndex: sourceRow.dataIndex,
             sheetRowNumber: sourceRow.sheetRowNumber,
             isChecked: nextCompleted,
@@ -624,27 +672,6 @@ export default function PenyelesaianDetail() {
         </div>
         {publicDetail && <span className="ml-auto rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Mode publik</span>}
       </header>
-
-      {sourceGroups.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pilih sumber data</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" onClick={() => setSourceGroup('ALL')} className={`rounded-xl px-3 py-2 text-sm font-semibold ${sourceGroup === 'ALL' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
-              Semua LK
-            </button>
-            {sourceGroups.map((group, index) => (
-              <button
-                key={group.groupId}
-                type="button"
-                onClick={() => setSourceGroup(group.groupId)}
-                className={`rounded-xl px-3 py-2 text-sm font-semibold ${sourceGroup === group.groupId ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-              >
-                {group.label || `LK ${index + 1}`}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
       <section className="grid gap-4 sm:grid-cols-3">
         <Stat icon={<Table2 />} label="Total data" value={stats.total} color="blue" />

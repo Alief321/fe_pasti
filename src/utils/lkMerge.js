@@ -45,7 +45,7 @@ function getSourceRowIndex(row, rowIndex, source) {
 function getSheetRowNumber(row, rowIndex, source) {
   const explicitNumber = row?._sheetRowNumber ?? row?.sheetRowNumber;
   if (Number.isInteger(explicitNumber)) return explicitNumber;
-  return getSourceRowIndex(row, rowIndex, source) + 1;
+  return getSourceRowIndex(row, rowIndex, source);
 }
 
 function getSourceReference(source, row, rowIndex) {
