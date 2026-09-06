@@ -1,5 +1,15 @@
 # React + Vite
 
+## Deploy ke Vercel
+
+Gunakan pengaturan berikut di project Vercel:
+
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variable: `VITE_API_URL=https://alamat-backend-production/api`
+
+`vercel.json` sudah menyediakan rewrite untuk `BrowserRouter`, sehingga refresh pada route selain `/` tetap diarahkan ke aplikasi React.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
