@@ -6,8 +6,6 @@ import { isAuthenticated } from '../auth';
 import { findDefaultKey, isCompleted, mergeLkRows, normalizeHeader } from '../utils/lkMerge';
 
 const EMPTY_FILTER_VALUE = '__EMPTY__';
-const VIRTUAL_ROW_HEIGHT = 76;
-const VIRTUAL_OVERSCAN = 10;
 const STANDARD_COLUMNS = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'];
 
 const handleShareLink = async () => {
@@ -222,7 +220,6 @@ export default function PenyelesaianDetail() {
   const [surveyName, setSurveyName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tableScrollTop, setTableScrollTop] = useState(0);
   const tableViewportRef = useRef(null);
   const publicDetail = !authenticated && Boolean(spreadsheetId) && !surveiId;
   const canUpdateStatus = authenticated || publicDetail;
@@ -658,13 +655,6 @@ export default function PenyelesaianDetail() {
     await handleStatusChange(row, noteDraft.trim());
   };
 
-  const virtualRowCount = Math.ceil((tableViewportRef.current?.clientHeight || 600) / VIRTUAL_ROW_HEIGHT);
-  const virtualStart = Math.max(0, Math.floor(tableScrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
-  const virtualEnd = Math.min(sortedRows.length, virtualStart + virtualRowCount + VIRTUAL_OVERSCAN * 2);
-  const virtualRows = sortedRows.slice(virtualStart, virtualEnd);
-  const topSpacerHeight = virtualStart * VIRTUAL_ROW_HEIGHT;
-  const bottomSpacerHeight = Math.max(0, (sortedRows.length - virtualEnd) * VIRTUAL_ROW_HEIGHT);
-
   if (loading) return <div className="rounded-3xl bg-white p-8 text-slate-500 shadow-sm">Memuat gabungan LK...</div>;
   if (error) return <div className="rounded-3xl border border-red-200 bg-red-50 p-8 text-red-700">{error}</div>;
 
@@ -959,7 +949,7 @@ export default function PenyelesaianDetail() {
       )}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div ref={tableViewportRef} onScroll={(event) => setTableScrollTop(event.currentTarget.scrollTop)} className="overflow-auto" style={{ maxHeight: '72vh' }}>
+        <div ref={tableViewportRef} className="overflow-auto" style={{ maxHeight: '72vh' }}>
           <table className="min-w-full table-fixed border-collapse text-left text-sm">
             <thead className="sticky top-0 z-20 bg-slate-900 text-white">
               <tr>
@@ -993,13 +983,7 @@ export default function PenyelesaianDetail() {
             </thead>
 
             <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-              {topSpacerHeight > 0 && (
-                <tr key="virtual-top-spacer" aria-hidden="true">
-                  <td colSpan={visibleHeaders.length + 2} style={{ height: topSpacerHeight, padding: 0 }} />
-                </tr>
-              )}
-              {virtualRows.map((row, rowIndex) => {
-                const index = virtualStart + rowIndex;
+              {sortedRows.map((row, index) => {
                 const completed = getRowCompletion(row);
                 const rowKeyValue = `${row._spreadsheetId ?? row[selectedKey] ?? 'row'}-${row._sourceRowIndex ?? index}`;
                 return (
@@ -1039,11 +1023,6 @@ export default function PenyelesaianDetail() {
                   </tr>
                 );
               })}
-              {bottomSpacerHeight > 0 && (
-                <tr key="virtual-bottom-spacer" aria-hidden="true">
-                  <td colSpan={visibleHeaders.length + 2} style={{ height: bottomSpacerHeight, padding: 0 }} />
-                </tr>
-              )}
             </tbody>
           </table>
 
