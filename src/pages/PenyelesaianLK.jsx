@@ -1,9 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CheckCircle, Copy, FileSpreadsheet, Link as LinkIcon, Plus, Share2, Trash2, UploadCloud, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, FileSpreadsheet, Link as LinkIcon, Pencil, Plus, Search, Trash2, UploadCloud } from 'lucide-react';
 import api from '../api';
 import { isAuthenticated } from '../auth';
+import { normalizeHeader } from '../utils/lkMerge';
 import UploadDropzone from '../components/UploadDropzone';
+
+const STANDARD_COLUMNS = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'];
+
+function hasStandardCounterpart(headers, target) {
+  return headers.some((header) => {
+    const value = normalizeHeader(header);
+    if (target === 'Status Penyelesaian') return value.includes('status') || value.includes('selesai') || value.includes('done') || value.includes('check');
+    if (target === 'Tanggal Selesai') return value.includes('tanggal') || value.includes('date') || value.includes('waktu') || value.includes('selesai');
+    return value.includes('catatan') || value.includes('note') || value.includes('komentar') || value.includes('keterangan') || value.includes('tindak_lanjut') || value.includes('action');
+  });
+}
 
 export default function PenyelesaianLK() {
   const authenticated = isAuthenticated();
@@ -13,13 +25,13 @@ export default function PenyelesaianLK() {
   const [selectedSurveiId, setSelectedSurveiId] = useState('');
   const [linkInput, setLinkInput] = useState('');
   const [fileInput, setFileInput] = useState(null);
-  const [mergeWithPrevious, setMergeWithPrevious] = useState(true);
+  const [mergeWithPrevious, setMergeWithPrevious] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState('');
   const [isInjecting, setIsInjecting] = useState(false);
   const [message, setMessage] = useState(null);
   const [nama, setNama] = useState('');
-  const [shareModal, setShareModal] = useState(null);
-  const [shareLinks, setShareLinks] = useState([]);
-  const [shareLoading, setShareLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [surveyFilter, setSurveyFilter] = useState('ALL');
 
   const fetchData = async () => {
     try {
@@ -64,6 +76,22 @@ export default function PenyelesaianLK() {
     return [...groups.values()];
   }, [lks, surveiList]);
 
+  const selectedSurveyLks = useMemo(() => lks.filter((lk) => String(lk.id_survei || lk.daftar_survei?.id) === String(selectedSurveiId)), [lks, selectedSurveiId]);
+
+  const filteredSurveyGroups = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return surveyGroups
+      .filter((group) => surveyFilter === 'ALL' || String(group.id) === String(surveyFilter))
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => {
+          const itemName = item.Nama || item.nama_lk || item.nama_file || item.file_name || `LK ${item.id}`;
+          return !query || itemName.toLowerCase().includes(query);
+        }),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [searchTerm, surveyFilter, surveyGroups]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!selectedSurveiId) return alert('Silakan pilih survei terlebih dahulu!');
@@ -73,7 +101,7 @@ export default function PenyelesaianLK() {
       let spreadsheetId;
       let spreadsheetUrl;
       if (inputMode === 'link') {
-        const response = await api.post('/sheets/inject-columns', { spreadsheetUrl: linkInput });
+        const response = await api.post('/sheets/inject-columns', { spreadsheetUrl: linkInput, columns: [], onlyMissing: true, resolveOnly: true });
         spreadsheetId = response.data.spreadsheetId;
         spreadsheetUrl = linkInput;
       } else {
@@ -85,6 +113,17 @@ export default function PenyelesaianLK() {
         spreadsheetId = response.data.spreadsheetId;
         spreadsheetUrl = response.data.webViewLink || response.data.spreadsheetUrl;
       }
+      const sheetResponse = await api.get(`/sheets/data/${spreadsheetId}`);
+      const sheets = sheetResponse.data?.sheets || sheetResponse.data?.worksheets || (Array.isArray(sheetResponse.data?.data) ? sheetResponse.data.data : [sheetResponse.data]);
+      const missingColumnsBySheet = sheets
+        .map((sheet) => ({
+          sheetName: sheet?.sheetName || sheet?.name || sheet?.sheet || 'Sheet1',
+          columns: STANDARD_COLUMNS.filter((column) => !hasStandardCounterpart(Array.isArray(sheet?.headers) ? sheet.headers : Object.keys((sheet?.rows || sheet?.data || [])[0] || {}), column)),
+        }))
+        .filter((sheet) => sheet.columns.length > 0);
+      if (missingColumnsBySheet.length > 0) {
+        await Promise.all(missingColumnsBySheet.map(({ sheetName, columns }) => api.post('/sheets/inject-columns', { spreadsheetId, spreadsheetUrl, sheetName, columns, onlyMissing: true })));
+      }
       await api.post('/penyelesaian', {
         id_survei: selectedSurveiId,
         link_spreadsheet_anomali: spreadsheetUrl,
@@ -92,12 +131,14 @@ export default function PenyelesaianLK() {
         Nama: nama,
         uploaded_by: 'Admin',
         gabung_dengan_sebelumnya: mergeWithPrevious,
+        gabung_dengan_id: mergeWithPrevious ? mergeTargetId || selectedSurveyLks.at(-1)?.id || null : null,
       });
       setMessage({ type: 'success', text: 'LK berhasil ditambahkan ke survei.' });
       setSelectedSurveiId('');
       setLinkInput('');
       setFileInput(null);
-      setMergeWithPrevious(true);
+      setMergeWithPrevious(false);
+      setMergeTargetId('');
       fetchData();
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.error || error.message });
@@ -110,7 +151,8 @@ export default function PenyelesaianLK() {
     const link = window.prompt('Masukkan link Spreadsheet baru:', lk.link_spreadsheet_anomali || '');
     if (!link || link === lk.link_spreadsheet_anomali) return;
     try {
-      await api.put(`/penyelesaian/${lk.id}`, { link_spreadsheet_anomali: link });
+      const namaLk = window.prompt('Masukkan nama LK:', lk.Nama || lk.nama_lk || lk.nama_file || '');
+      await api.put(`/penyelesaian/${lk.id}`, { link_spreadsheet_anomali: link, Nama: namaLk || undefined });
       fetchData();
     } catch (error) {
       alert('Gagal memperbarui LK: ' + (error.response?.data?.error || error.message));
@@ -127,44 +169,6 @@ export default function PenyelesaianLK() {
     }
   };
 
-  const openShare = async (lk) => {
-    setShareModal({ lk, error: '' });
-    setShareLoading(true);
-    try {
-      const response = await api.get(`/penyelesaian/${lk.id}/shares`);
-      setShareLinks(response.data?.shares || response.data || []);
-    } catch (error) {
-      setShareLinks([]);
-      setShareModal((current) => ({ ...current, error: error.response?.data?.error || 'Link berbagi belum dapat dimuat.' }));
-    } finally {
-      setShareLoading(false);
-    }
-  };
-
-  const createShare = async () => {
-    if (!shareModal?.lk) return;
-    setShareLoading(true);
-    try {
-      const response = await api.post(`/penyelesaian/${shareModal.lk.id}/share`, { permission: 'view' });
-      const share = response.data?.share || response.data;
-      setShareLinks((current) => [share, ...current]);
-    } catch (error) {
-      setShareModal((current) => ({ ...current, error: error.response?.data?.error || 'Link berbagi belum berhasil dibuat.' }));
-    } finally {
-      setShareLoading(false);
-    }
-  };
-
-  const revokeShare = async (share) => {
-    if (!window.confirm('Cabut link publik ini?')) return;
-    try {
-      await api.delete(`/penyelesaian/${shareModal.lk.id}/shares/${share.id}`);
-      setShareLinks((current) => current.filter((item) => item.id !== share.id));
-    } catch (error) {
-      alert(error.response?.data?.error || 'Link belum dapat dicabut.');
-    }
-  };
-
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -178,6 +182,30 @@ export default function PenyelesaianLK() {
           <p className="mt-1 text-3xl font-bold">{surveyGroups.length}</p>
         </div>
       </header>
+
+      <section className="sticky top-3 z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
+        <div className="relative min-w-60 flex-1">
+          <Search size={17} className="absolute left-3 top-3 text-slate-400" />
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Cari nama LK..."
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+          />
+        </div>
+        <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Survei
+          <select value={surveyFilter} onChange={(event) => setSurveyFilter(event.target.value)} className="mt-1 min-w-52 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-normal text-slate-800">
+            <option value="ALL">Semua survei</option>
+            {surveyGroups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="text-xs text-slate-500">{filteredSurveyGroups.reduce((total, group) => total + group.items.length, 0)} LK tampil</span>
+      </section>
 
       {authenticated && (
         <section className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm">
@@ -204,7 +232,7 @@ export default function PenyelesaianLK() {
             </label>
 
             <label className="mt-4 text-sm font-medium text-slate-700">Nama LK </label>
-            <input type="text" placeholder="Nama LK" className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 font-normal" value={nama} onChange={(event) => setNama(event.target.value)} />
+            <input type="text" required placeholder="Nama LK" className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 font-normal" value={nama} onChange={(event) => setNama(event.target.value)} />
             <div className="flex rounded-xl bg-slate-100 p-1 text-sm">
               <button type="button" onClick={() => setInputMode('upload')} className={`flex-1 rounded-lg px-3 py-2 ${inputMode === 'upload' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>
                 <UploadCloud size={16} className="mr-1 inline" />
@@ -221,13 +249,23 @@ export default function PenyelesaianLK() {
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className={`cursor-pointer rounded-xl border p-3 ${mergeWithPrevious ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
                   <input type="radio" name="lk-merge-mode" checked={mergeWithPrevious} onChange={() => setMergeWithPrevious(true)} className="mr-2 accent-blue-600" />
-                  <span className="text-sm font-semibold text-slate-800">Gabungkan dengan LK sebelumnya</span>
-                  <span className="mt-1 block pl-5 text-xs text-slate-500">Data tampil dalam satu tabel gabungan.</span>
+                  <span className="text-sm font-semibold text-slate-800">Gabungkan ke LK tertentu</span>
+                  <span className="mt-1 block pl-5 text-xs text-slate-500">Pilih LK tujuan. Jika tidak dipilih, LK ini masuk ke LK terakhir.</span>
+                  {mergeWithPrevious && selectedSurveyLks.length > 0 && (
+                    <select value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} className="mt-3 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-xs font-normal text-slate-700">
+                      <option value="">LK terakhir dalam survei</option>
+                      {selectedSurveyLks.map((lk) => (
+                        <option key={lk.id} value={lk.id}>
+                          {lk.nama_lk || lk.nama_file || lk.file_name || `LK ${lk.id}`}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </label>
                 <label className={`cursor-pointer rounded-xl border p-3 ${!mergeWithPrevious ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
                   <input type="radio" name="lk-merge-mode" checked={!mergeWithPrevious} onChange={() => setMergeWithPrevious(false)} className="mr-2 accent-blue-600" />
-                  <span className="text-sm font-semibold text-slate-800">Buat LK terpisah</span>
-                  <span className="mt-1 block pl-5 text-xs text-slate-500">Data tersedia di tab LK sendiri.</span>
+                  <span className="text-sm font-semibold text-slate-800">Jangan gabungkan</span>
+                  <span className="mt-1 block pl-5 text-xs text-slate-500">LK ini tetap berdiri sendiri dan muncul di daftar survei.</span>
                 </label>
               </div>
             </fieldset>
@@ -266,8 +304,8 @@ export default function PenyelesaianLK() {
         </section>
       )}
 
-      <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {surveyGroups.map((group) => (
+      <section className="flex flex-col w-full flex-wrap gap-6">
+        {filteredSurveyGroups.map((group) => (
           <article key={group.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
             <div className="flex items-start justify-between gap-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
@@ -276,71 +314,39 @@ export default function PenyelesaianLK() {
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{group.items.length} LK</span>
             </div>
             <h2 className="mt-5 line-clamp-2 text-lg font-bold text-slate-900">{group.name}</h2>
-            <p className="mt-2 text-sm text-slate-500">Gabungan LK siap dipantau dalam satu tampilan.</p>
+            <p className="mt-2 text-sm text-slate-500">Daftar LK pada survei ini:</p>
+            <div className="mt-3 space-y-2 rounded-xl bg-slate-50 p-3">
+              {group.items.map((item, itemIndex) => (
+                <div key={`${group.id}-${item.id || item.spreadsheet_id || 'lk'}-${itemIndex}`} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-sm font-semibold text-slate-700">{item.Nama || item.nama_lk || item.name || item.nama_file || `LK ${item.id}`}</span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Link to={`/penyelesaian/${item.spreadsheet_id}`} title="Buka link detail tanpa login" className="rounded-lg px-2 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50">
+                      Buka detail
+                    </Link>
+                    {authenticated && (
+                      <button type="button" onClick={() => handleEdit(item)} title="Edit LK" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+                        <Pencil size={15} />
+                      </button>
+                    )}
+                    {authenticated && (
+                      <button type="button" onClick={() => handleDelete(item.id)} title="Hapus LK" className="rounded-lg p-2 text-rose-600 hover:bg-rose-50">
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
             <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
               <Link to={`/penyelesaian/survei/${group.id}`} className="text-sm font-semibold text-blue-600 hover:text-blue-700">
                 Buka LK gabungan →
               </Link>
-              {authenticated && (
-                <div className="flex gap-1">
-                  {group.items.map((item) => (
-                    <span key={item.id} className="flex gap-1">
-                      <button type="button" onClick={() => openShare(item)} title={`Bagikan ${item.nama_lk || item.nama_file || 'LK'}`} className="rounded-lg bg-blue-50 p-2 text-blue-600 hover:bg-blue-100">
-                        <Share2 size={15} />
-                      </button>
-                      <button type="button" onClick={() => handleEdit(item)} className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200">
-                        Edit
-                      </button>
-                      <button type="button" onClick={() => handleDelete(item.id)} title="Hapus LK" className="rounded-lg bg-red-50 p-2 text-red-600 hover:bg-red-100">
-                        <Trash2 size={15} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+              <span className="text-xs font-medium text-slate-400">Link detail tersedia per LK</span>
             </div>
           </article>
         ))}
       </section>
-      {surveyGroups.length === 0 && <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Belum ada LK yang terhubung.</div>}
-
-      {shareModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <div>
-                <h2 className="font-bold text-slate-900">Bagikan LK</h2>
-                <p className="text-xs text-slate-500">Penerima dapat melihat data tanpa login.</p>
-              </div>
-              <button type="button" onClick={() => setShareModal(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="space-y-3 p-5">
-              <button type="button" onClick={createShare} disabled={shareLoading} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
-                {shareLoading ? 'Memproses...' : 'Buat link baru'}
-              </button>
-              {shareModal.error && <p className="text-xs text-rose-600">{shareModal.error}</p>}
-              {shareLinks.map((share) => {
-                const token = share.token || share.public_token;
-                const url = share.url || share.public_url || (token ? `${window.location.origin}/penyelesaian/public/${token}` : '');
-                return (
-                  <div key={share.id || url} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2">
-                    <input readOnly value={url} className="min-w-0 flex-1 border-0 bg-transparent text-xs text-slate-600 outline-none" />
-                    <button type="button" onClick={() => navigator.clipboard.writeText(url)} title="Salin link" className="rounded-md bg-slate-100 p-2 text-slate-600">
-                      <Copy size={14} />
-                    </button>
-                    <button type="button" onClick={() => revokeShare(share)} className="text-xs text-rose-600">
-                      Cabut
-                    </button>
-                  </div>
-                );
-              })}
-              {!shareLoading && !shareLinks.length && <p className="text-xs text-slate-400">Belum ada link aktif.</p>}
-            </div>
-          </div>
-        </div>
-      )}
+      {filteredSurveyGroups.length === 0 && <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">Tidak ada LK yang cocok dengan filter.</div>}
     </div>
   );
 }

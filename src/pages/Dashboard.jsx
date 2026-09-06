@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, ArrowRight, CheckCircle, Users, CalendarRange } from 'lucide-react';
 import api from '../api';
+import { isAuthenticated } from '../auth';
 import { Link } from 'react-router-dom';
 
 const defaultSummary = {
@@ -38,6 +39,10 @@ function Dashboard() {
   const [selectedSurvey, setSelectedSurvey] = useState('ALL');
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      return undefined;
+    }
+
     const loadDashboard = async () => {
       setLoading(true);
       setError('');
@@ -81,7 +86,6 @@ function Dashboard() {
 
   const totalAnomaliFiltered = chartData.reduce((sum, item) => sum + Number(item.total_anomali || 0), 0);
   const totalPenyelesaianFiltered = chartData.reduce((sum, item) => sum + Number(item.total_penyelesaian || 0), 0);
-  const completionRate = totalAnomaliFiltered > 0 ? (totalPenyelesaianFiltered / totalAnomaliFiltered) * 100 : 0;
 
   const topStatCards = [
     {
@@ -110,6 +114,30 @@ function Dashboard() {
     const scoreB = Number(b.total_anomali || 0) + Number(b.total_penyelesaian || 0);
     return scoreB - scoreA;
   });
+
+  if (!isAuthenticated()) {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6">
+        <header className="rounded-3xl bg-slate-900 p-8 text-white shadow-xl sm:p-12">
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-sky-300">PASTI</p>
+          <h1 className="mt-3 max-w-2xl text-3xl font-bold sm:text-4xl">Platform pemantauan anomali dan penyelesaian LK</h1>
+          <p className="mt-4 max-w-2xl leading-7 text-slate-300">PASTI membantu tim mengelola survei, meninjau anomali, menggabungkan LK, dan memantau status penyelesaian dalam satu tempat.</p>
+        </header>
+        <section className="grid gap-4 md:grid-cols-3">
+          {[
+            ['Pantau penyelesaian', 'Lihat daftar LK dan link publik yang tersedia.'],
+            ['Gabungkan data', 'Satukan LK berdasarkan kolom yang saling berpasangan.'],
+            ['Bagikan hasil', 'Berikan akses baca melalui link publik tanpa login.'],
+          ].map(([title, description]) => (
+            <article key={title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="font-bold text-slate-900">{title}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
+            </article>
+          ))}
+        </section>
+      </div>
+    );
+  }
 
   if (loading) {
     return <div className="mx-auto max-w-7xl rounded-2xl border border-slate-200 bg-white p-8 text-slate-500 shadow-sm">Memuat dashboard...</div>;

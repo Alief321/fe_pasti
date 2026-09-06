@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, ClipboardList, AlertCircle, CheckSquare, Sparkles, PanelLeftClose, PanelLeftOpen, Code2, LogOut, Users } from 'lucide-react';
+import { Home, ClipboardList, AlertCircle, CheckSquare, Sparkles, PanelLeftClose, PanelLeftOpen, Code2, LogIn, LogOut, Users } from 'lucide-react';
 
 export default function Sidebar({ isCollapsed, onToggle, isAuthenticated }) {
   const location = useLocation();
@@ -69,6 +69,16 @@ export default function Sidebar({ isCollapsed, onToggle, isAuthenticated }) {
               <LogOut size={18} />
             </span>
             {!isCollapsed && <span className="text-sm font-medium">Logout</span>}
+          </Link>
+        </div>
+      )}
+      {!isAuthenticated && (
+        <div className="mx-3 mb-4 mt-auto">
+          <Link to="/login" className={`group flex items-center rounded-2xl px-3 py-3 text-slate-600 transition hover:bg-sky-50 hover:text-sky-700 ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
+              <LogIn size={18} />
+            </span>
+            {!isCollapsed && <span className="text-sm font-medium">Login</span>}
           </Link>
         </div>
       )}

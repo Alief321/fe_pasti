@@ -3,14 +3,26 @@ import { AlertTriangle, Search, Table2 } from 'lucide-react';
 import api from '../api';
 
 function getSources(payload) {
-  const sources = Array.isArray(payload) ? payload : payload?.sources || payload?.data?.sources || (Array.isArray(payload?.data) ? payload.data : payload?.rows ? [{ headers: payload.headers, rows: payload.rows }] : []);
-  return sources.map((source, index) => ({
-    id: source.sourceKey || source.id || index,
-    label: source.label || source.nama_lk || `LK ${index + 1}`,
-    sheetName: source.sheetName || source.sheet || 'Sheet1',
-    headers: source.headers || Object.keys(source.rows?.[0] || source.data?.[0] || {}),
-    rows: source.rows || source.data || [],
-  }));
+  const wrappedData = payload?.data && !Array.isArray(payload.data) ? payload.data : null;
+  const sourceList = payload?.sources || wrappedData?.sources || payload?.sheets || wrappedData?.sheets || payload?.worksheets || wrappedData?.worksheets;
+  const rawRows = payload?.rows || wrappedData?.rows || wrappedData?.data;
+  const data = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : Array.isArray(rawRows) ? [{ headers: payload.headers || wrappedData?.headers, rows: rawRows }] : sourceList || (payload ? [payload] : []);
+  const sources = sourceList || data;
+
+  const looksLikeSource = (source) => source && (Array.isArray(source.rows) || Array.isArray(source.data) || Array.isArray(source.headers) || source.sheetName || source.sheet || source.sourceKey);
+  const normalizedSources = sources.length && sources.every(looksLikeSource) ? sources : [{ rows: sources }];
+
+  return normalizedSources.map((source, index) => {
+    const rows = Array.isArray(source.rows) ? source.rows : Array.isArray(source.data) ? source.data : [];
+    const headers = Array.isArray(source.headers) && source.headers.length > 0 ? source.headers : Object.keys(rows.find((row) => row && typeof row === 'object') || {});
+    return {
+      id: source.sourceKey || source.id || index,
+      label: source.label || source.nama_lk || payload?.nama_lk || `LK ${index + 1}`,
+      sheetName: source.sheetName || source.sheet || 'Sheet1',
+      headers,
+      rows,
+    };
+  });
 }
 
 export default function PenyelesaianPublic() {
