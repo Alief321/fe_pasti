@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUpDown, CheckCircle2, Filter, Layers3, Save, Search, SlidersHorizontal, Table2 } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, CheckCircle2, Filter, Layers3, Save, Search, Share2, SlidersHorizontal, Table2 } from 'lucide-react';
 import api from '../api';
 import { isAuthenticated } from '../auth';
 import { findDefaultKey, isCompleted, mergeLkRows, normalizeHeader } from '../utils/lkMerge';
@@ -9,6 +9,15 @@ const EMPTY_FILTER_VALUE = '__EMPTY__';
 const VIRTUAL_ROW_HEIGHT = 76;
 const VIRTUAL_OVERSCAN = 10;
 const STANDARD_COLUMNS = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'];
+
+const handleShareLink = async () => {
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    alert('Tautan halaman ini berhasil disalin ke clipboard!');
+  } catch (err) {
+    alert('Gagal menyalin tautan.', err);
+  }
+};
 
 const hasStandardCounterpart = (headers, target) =>
   headers.some((header) => {
@@ -670,7 +679,15 @@ export default function PenyelesaianDetail() {
           <h1 className="mt-1 text-2xl font-bold text-slate-900">Penyelesaian Anomali{surveyName ? ` · ${surveyName}` : ''}</h1>
           <p className="text-sm text-slate-500">Periksa dan tandai data yang sudah diselesaikan.</p>
         </div>
-        {publicDetail && <span className="ml-auto rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Mode publik</span>}
+        <div className="ml-auto flex items-center gap-3">
+          {authenticated && (
+            <button type="button" onClick={handleShareLink} className="flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 transition-colors" title="Salin tautan untuk dibagikan">
+              <Share2 size={18} />
+              Bagikan
+            </button>
+          )}
+          {publicDetail && <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Mode publik</span>}
+        </div>
       </header>
 
       <section className="grid gap-4 sm:grid-cols-3">
