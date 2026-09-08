@@ -115,15 +115,29 @@ export default function DaftarAnomali() {
     }
   }
 
+  // --- FUNGSI TAMBAHAN UNTUK RESET STATE MODAL ---
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingId(null);
+    setFormData({ id_survei: '', jenis_anomali: '', sql_query: '' });
+    setSqlFiles([]);
+  };
+
+  const handleTambah = () => {
+    setEditingId(null);
+    setFormData({ id_survei: '', jenis_anomali: '', sql_query: '' });
+    setSqlFiles([]);
+    setIsModalOpen(true);
+  };
+  // ------------------------------------------------
+
   const handleSimpanAnomali = async (e) => {
     e.preventDefault();
     try {
       if (editingId) await api.put(`/anomali/${editingId}`, formData);
       else await api.post('/anomali', formData);
-      setIsModalOpen(false);
-      setEditingId(null);
-      setFormData({ id_survei: '', jenis_anomali: '', sql_query: '' });
-      setSqlFiles([]);
+      
+      handleCloseModal(); // Gunakan fungsi reset yang sudah dibuat
       fetchData(); // Refresh tabel
     } catch (error) {
       alert('Gagal menyimpan anomali: ' + (error.response?.data?.error || error.message));
@@ -191,7 +205,8 @@ export default function DaftarAnomali() {
           <h1 className="text-2xl font-bold text-slate-900">Daftar Aturan Anomali (SQL)</h1>
           <p className="text-slate-500">Kelola master query SQL untuk mendeteksi anomali pada setiap survei.</p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+        {/* Ubah onClick menjadi handleTambah */}
+        <button onClick={handleTambah} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
           <Plus size={16} /> Tambah Aturan SQL
         </button>
       </div>
@@ -283,7 +298,8 @@ export default function DaftarAnomali() {
                 <Database className="text-blue-600" size={24} />
                 <h2 className="text-xl font-bold">{editingId ? 'Edit Aturan SQL' : 'Simpan Aturan SQL Baru'}</h2>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-700">
+              {/* Ubah onClick menjadi handleCloseModal */}
+              <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-700">
                 <X size={24} />
               </button>
             </div>
@@ -347,7 +363,8 @@ export default function DaftarAnomali() {
             </div>
 
             <div className="p-6 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
-              <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition">
+              {/* Ubah onClick menjadi handleCloseModal */}
+              <button type="button" onClick={handleCloseModal} className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition">
                 Batal
               </button>
               <button type="submit" form="form-anomali" className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm">

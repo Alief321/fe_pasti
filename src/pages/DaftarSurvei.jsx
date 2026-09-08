@@ -68,6 +68,20 @@ export default function DaftarSurvei() {
     setCurrentPage(1);
   }, [searchTerm]);
 
+  // --- FUNGSI TAMBAHAN UNTUK RESET STATE MODAL ---
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingId(null);
+    setFormData({ nama_survei: '', deskripsi_survei: '' });
+  };
+
+  const handleTambah = () => {
+    setEditingId(null);
+    setFormData({ nama_survei: '', deskripsi_survei: '' });
+    setIsModalOpen(true);
+  };
+  // ------------------------------------------------
+
   // Fungsi untuk mengirim data baru ke server
   const handleTambahSurvei = async (e) => {
     e.preventDefault();
@@ -77,10 +91,8 @@ export default function DaftarSurvei() {
       if (editingId) await api.put(`/survei/${editingId}`, formData);
       else await api.post('/survei', formData);
 
-      // Tutup modal dan reset form setelah berhasil
-      setIsModalOpen(false);
-      setEditingId(null);
-      setFormData({ nama_survei: '', deskripsi_survei: '' });
+      // Tutup modal dan reset form menggunakan fungsi yang sudah dibuat
+      handleCloseModal();
 
       // Ambil ulang data terbaru untuk memperbarui tabel
       fetchSurvei();
@@ -114,7 +126,8 @@ export default function DaftarSurvei() {
           <h1 className="text-2xl font-bold text-slate-900">Daftar Survei</h1>
           <p className="text-slate-500">Kelola master data kegiatan survei / sensus.</p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+        {/* Ubah onClick menjadi handleTambah */}
+        <button onClick={handleTambah} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
           <Plus size={16} /> Tambah Survei
         </button>
       </div>
@@ -133,7 +146,6 @@ export default function DaftarSurvei() {
                 className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-700 outline-none ring-0 focus:border-blue-500"
               />
             </div>
-            {/* <div className="text-sm text-slate-500">{filteredSurvei.length} data</div> */}
           </div>
 
           <DataTable headers={['Nama Survei', 'Deskripsi', 'Tanggal Dibuat', 'Aksi']}>
@@ -198,7 +210,8 @@ export default function DaftarSurvei() {
                 <ClipboardList className="text-blue-600" size={20} />
                 <h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Survei' : 'Tambah Survei Baru'}</h2>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-700 hover:bg-slate-200 p-1 rounded transition">
+              {/* Ubah onClick menjadi handleCloseModal */}
+              <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-700 hover:bg-slate-200 p-1 rounded transition">
                 <X size={20} />
               </button>
             </div>
@@ -235,7 +248,8 @@ export default function DaftarSurvei() {
 
             {/* Modal Footer */}
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
-              <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition">
+              {/* Ubah onClick menjadi handleCloseModal */}
+              <button type="button" onClick={handleCloseModal} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition">
                 Batal
               </button>
               <button type="submit" form="form-survei" disabled={isSubmitting} className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm disabled:opacity-50 flex items-center">
