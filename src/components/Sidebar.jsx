@@ -17,35 +17,37 @@ export default function Sidebar({ isCollapsed, onToggle, isAuthenticated }) {
   const menus = isAuthenticated ? protectedMenus : publicMenus;
 
   return (
-    <aside className={`relative flex h-full flex-col border-r border-slate-200/80 bg-white/90 backdrop-blur-xl shadow-[0_20px_60px_-20px_rgba(15,23,42,0.25)] transition-all duration-300 ${isCollapsed ? 'w-20' : 'w-72'}`}>
+    <aside 
+      className={`fixed inset-y-0 left-0 z-40 flex h-full flex-col border-r border-slate-200/80 bg-white/90 backdrop-blur-xl shadow-[0_20px_60px_-20px_rgba(15,23,42,0.25)] transition-all duration-300 md:relative 
+      ${isCollapsed ? '-translate-x-full md:translate-x-0 md:w-20' : 'translate-x-0 w-72'}`}
+    >
       <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-5">
-        {isCollapsed ? (
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-linear-to-br from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/30">
+        {/* Di mobile, header selalu menampilkan versi lebar karena w-72 aktif saat terbuka */}
+        <div className={`flex items-center gap-3 transition-opacity ${isCollapsed ? 'md:hidden' : 'block'}`}>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/30">
             <Sparkles size={18} />
           </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-linear-to-br from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/30">
-              <Sparkles size={18} />
-            </div>
-            <div>
-              {/* <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400"></p> */}
-              <h1 className="text-lg font-bold text-slate-900">PASTI</h1>
-            </div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-900 whitespace-nowrap">PASTI</h1>
           </div>
-        )}
+        </div>
+        
+        {/* Ikon untuk collapsed view khusus Desktop */}
+        <div className={`mx-auto items-center justify-center rounded-2xl bg-linear-to-br from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/30 h-10 w-10 shrink-0 ${isCollapsed ? 'hidden md:flex' : 'hidden'}`}>
+          <Sparkles size={18} />
+        </div>
 
         <button
           type="button"
           onClick={onToggle}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+          className={`flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 ${isCollapsed ? 'hidden md:flex' : 'flex'}`}
           aria-label={isCollapsed ? 'Buka sidebar' : 'Tutup sidebar'}
         >
           {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
       </div>
 
-      <nav className="flex-1 space-y-1.5 px-3 py-4">
+      <nav className="flex-1 space-y-1.5 px-3 py-4 overflow-y-auto">
         {menus.map((menu) => {
           const isActive = location.pathname === menu.path;
 
@@ -53,35 +55,32 @@ export default function Sidebar({ isCollapsed, onToggle, isAuthenticated }) {
             <Link
               key={menu.path}
               to={menu.path}
-              className={`group flex items-center rounded-2xl px-3 py-3 transition-all ${isActive ? 'bg-sky-50 text-sky-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'} ${isCollapsed ? 'justify-center' : 'gap-3'}`}
+              className={`group flex items-center rounded-2xl px-3 py-3 transition-all ${isActive ? 'bg-sky-50 text-sky-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'} ${isCollapsed ? 'md:justify-center' : 'gap-3'}`}
             >
-              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${isActive ? 'bg-white text-sky-700 shadow-sm' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'}`}>{menu.icon}</span>
-              {!isCollapsed && <span className="text-sm font-medium">{menu.name}</span>}
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isActive ? 'bg-white text-sky-700 shadow-sm' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200'}`}>{menu.icon}</span>
+              <span className={`text-sm font-medium whitespace-nowrap ${isCollapsed ? 'hidden' : 'block'}`}>{menu.name}</span>
             </Link>
           );
         })}
       </nav>
 
-      {isAuthenticated && (
-        <div className="mx-3 mb-4 mt-auto">
-          <Link to="/logout" className={`group flex items-center rounded-2xl px-3 py-3 text-slate-600 transition hover:bg-red-50 hover:text-red-600 ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-600">
+      <div className="mx-3 mb-4 mt-auto space-y-2">
+        {isAuthenticated ? (
+          <Link to="/logout" className={`group flex items-center rounded-2xl px-3 py-3 text-slate-600 transition hover:bg-red-50 hover:text-red-600 ${isCollapsed ? 'md:justify-center' : 'gap-3'}`}>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600">
               <LogOut size={18} />
             </span>
-            {!isCollapsed && <span className="text-sm font-medium">Logout</span>}
+            <span className={`text-sm font-medium whitespace-nowrap ${isCollapsed ? 'hidden' : 'block'}`}>Logout</span>
           </Link>
-        </div>
-      )}
-      {!isAuthenticated && (
-        <div className="mx-3 mb-4 mt-auto">
-          <Link to="/login" className={`group flex items-center rounded-2xl px-3 py-3 text-slate-600 transition hover:bg-sky-50 hover:text-sky-700 ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
+        ) : (
+          <Link to="/login" className={`group flex items-center rounded-2xl px-3 py-3 text-slate-600 transition hover:bg-sky-50 hover:text-sky-700 ${isCollapsed ? 'md:justify-center' : 'gap-3'}`}>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
               <LogIn size={18} />
             </span>
-            {!isCollapsed && <span className="text-sm font-medium">Login</span>}
+            <span className={`text-sm font-medium whitespace-nowrap ${isCollapsed ? 'hidden' : 'block'}`}>Login</span>
           </Link>
-        </div>
-      )}
+        )}
+      </div>
     </aside>
   );
 }
