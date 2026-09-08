@@ -18,7 +18,7 @@ export default function Sidebar({ isCollapsed, onToggle, isAuthenticated }) {
 
   return (
     <aside 
-      className={`fixed inset-y-0 left-0 z-40 flex h-full flex-col border-r border-slate-200/80 bg-white/90 backdrop-blur-xl shadow-[0_20px_60px_-20px_rgba(15,23,42,0.25)] transition-all duration-300 md:relative 
+      className={`fixed inset-y-0 left-0 z-50 flex h-full flex-col border-r border-slate-200/80 bg-white/90 backdrop-blur-xl shadow-[0_20px_60px_-20px_rgba(15,23,42,0.25)] transition-all duration-300 md:relative 
       ${isCollapsed ? '-translate-x-full md:translate-x-0 md:w-20' : 'translate-x-0 w-72'}`}
     >
       <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-5">

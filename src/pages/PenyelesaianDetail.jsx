@@ -220,6 +220,7 @@ export default function PenyelesaianDetail() {
   const [surveyName, setSurveyName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const tableViewportRef = useRef(null);
   const publicDetail = !authenticated && Boolean(spreadsheetId) && !surveiId;
   const canUpdateStatus = authenticated || publicDetail;
@@ -765,68 +766,87 @@ export default function PenyelesaianDetail() {
         </section>
       )}
 
-      <section className="sticky top-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
-        <div className="relative min-w-56 flex-1">
-          <Search className="absolute left-3 top-3 text-slate-400" size={17} />
-          <input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Cari data..."
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
-          />
-        </div>
-        <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Status
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-normal text-slate-800">
-            <option value="ALL">Semua</option>
-            <option value="SELESAI">Selesai</option>
-            <option value="BELUM">Belum selesai</option>
-          </select>
-        </label>
-        <div className="relative">
+      <section className="relative md:sticky md:top-3 z-30 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
+        {/* Bagian Atas Mobile: Search Bar + Tombol Buka/Tutup Filter */}
+        <div className="flex w-full items-center gap-2 md:w-auto md:flex-1">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-3 text-slate-400" size={17} />
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Cari data..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
           <button
             type="button"
-            onClick={() => setHiddenColumnsOpen((value) => !value)}
-            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold ${hiddenColumns.length ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700'}`}
+            onClick={() => setShowMobileFilters((prev) => !prev)}
+            className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border transition-colors md:hidden ${showMobileFilters ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700'}`}
+            aria-label="Tampilkan filter"
           >
-            <SlidersHorizontal size={16} /> Kolom{hiddenColumns.length ? ` (${hiddenColumns.length} tersembunyi)` : ''}
+            <Filter size={18} />
           </button>
-          {hiddenColumnsOpen && (
-            <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Tampilkan kolom</p>
-                <button type="button" onClick={() => setHiddenColumns([])} className="text-xs font-semibold text-blue-600">
-                  Reset
-                </button>
+        </div>
+
+        {/* Kontainer Filter Tambahan: Disembunyikan di mobile secara default, selalu tampil di desktop */}
+        <div className={`w-full flex-col gap-3 md:w-auto md:flex-row md:items-center ${showMobileFilters ? 'flex' : 'hidden md:flex'}`}>
+          <label className="flex w-full flex-col text-xs font-semibold uppercase tracking-wider text-slate-500 md:w-auto md:block">
+            Status
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-normal text-slate-800 md:w-auto">
+              <option value="ALL">Semua</option>
+              <option value="SELESAI">Selesai</option>
+              <option value="BELUM">Belum selesai</option>
+            </select>
+          </label>
+          
+          <div className="relative w-full md:w-auto">
+            <button
+              type="button"
+              onClick={() => setHiddenColumnsOpen((value) => !value)}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold md:w-auto ${hiddenColumns.length ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700'}`}
+            >
+              <SlidersHorizontal size={16} /> Kolom{hiddenColumns.length ? ` (${hiddenColumns.length} tersembunyi)` : ''}
+            </button>
+            
+            {hiddenColumnsOpen && (
+              <div className="absolute left-0 top-full z-40 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl md:left-auto md:right-0 md:w-72">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Tampilkan kolom</p>
+                  <button type="button" onClick={() => setHiddenColumns([])} className="text-xs font-semibold text-blue-600">
+                    Reset
+                  </button>
+                </div>
+                <div className="max-h-64 space-y-1 overflow-auto">
+                  {headers.map((header) => {
+                    if (['status_penyelesaian', 'tanggal_selesai'].includes(normalizeHeader(header))) return null;
+                    const checked = !hiddenColumns.includes(header);
+                    return (
+                      <label key={header} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                        <input type="checkbox" checked={checked} onChange={() => handleToggleHiddenColumn(header)} className="h-4 w-4 accent-blue-600" />
+                        <span className="truncate">{header}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="max-h-64 space-y-1 overflow-auto">
-                {headers.map((header) => {
-                  if (['status_penyelesaian', 'tanggal_selesai'].includes(normalizeHeader(header))) return null;
-                  const checked = !hiddenColumns.includes(header);
-                  return (
-                    <label key={header} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                      <input type="checkbox" checked={checked} onChange={() => handleToggleHiddenColumn(header)} className="h-4 w-4 accent-blue-600" />
-                      <span className="truncate">{header}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
+            )}
+          </div>
+          
+          {!publicDetail && (
+            <button
+              type="button"
+              onClick={() => setShowAdvancedSettings((value) => !value)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 md:w-auto"
+            >
+              <SlidersHorizontal size={16} />
+              {showAdvancedSettings ? 'Tutup pengaturan' : 'Pengaturan lanjutan'}
+            </button>
           )}
+          
+          <span className="flex w-full items-center justify-center gap-2 text-xs text-slate-500 md:w-auto md:justify-start">
+            <Filter size={15} /> {sortedRows.length} baris tampil
+          </span>
         </div>
-        {!publicDetail && (
-          <button
-            type="button"
-            onClick={() => setShowAdvancedSettings((value) => !value)}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            <SlidersHorizontal size={16} />
-            {showAdvancedSettings ? 'Tutup pengaturan' : 'Pengaturan lanjutan'}
-          </button>
-        )}
-        <span className="flex items-center gap-2 text-xs text-slate-500">
-          <Filter size={15} /> {sortedRows.length} baris tampil
-        </span>
       </section>
 
       {showAdvancedSettings && (detectedStatusColumns.length > 0 || detectedDateColumns.length > 0 || detectedNoteColumns.length > 0) && (

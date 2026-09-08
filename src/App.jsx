@@ -63,7 +63,7 @@ function AppLayout() {
       {/* Backdrop overlay untuk mobile: Muncul jika sidebar terbuka */}
       {!isSidebarCollapsed && (
         <div 
-          className="fixed inset-0 z-30 bg-slate-900/50 backdrop-blur-sm transition-opacity md:hidden"
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm transition-opacity md:hidden"
           onClick={() => setIsSidebarCollapsed(true)}
           aria-hidden="true"
         />
@@ -80,7 +80,7 @@ function AppLayout() {
         <button
           type="button"
           onClick={() => setIsSidebarCollapsed(false)}
-          className={`fixed left-4 top-4 z-20 flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/90 text-slate-700 shadow-lg backdrop-blur transition-all ${!isSidebarCollapsed ? 'hidden md:hidden' : 'flex md:flex'}`}
+          className={`fixed left-4 top-4 z-40 flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/90 text-slate-700 shadow-lg backdrop-blur transition-all ${!isSidebarCollapsed ? 'hidden md:hidden' : 'flex md:flex'}`}
           aria-label="Buka sidebar"
         >
           <PanelLeftOpen size={18} className="hidden md:block" />
