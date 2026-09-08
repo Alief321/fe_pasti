@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUpDown, CheckCircle2, Filter, Layers3, Save, Search, Share2, SlidersHorizontal, Table2 } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, CheckCircle2, Filter, Layers3, Save, Search, Share2, SlidersHorizontal, Table2, ChevronLeft, ChevronRight } from 'lucide-react';
 import api from '../api';
 import { isAuthenticated } from '../auth';
 import { findDefaultKey, isCompleted, mergeLkRows, normalizeHeader } from '../utils/lkMerge';
 
 const EMPTY_FILTER_VALUE = '__EMPTY__';
 const STANDARD_COLUMNS = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'];
+const PAGE_SIZE = 50; // Batas paginasi untuk mengatasi lag pada data besar
 
 const handleShareLink = async () => {
   try {
@@ -221,13 +222,14 @@ export default function PenyelesaianDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  
   const tableViewportRef = useRef(null);
   const publicDetail = !authenticated && Boolean(spreadsheetId) && !surveiId;
   const canUpdateStatus = authenticated || publicDetail;
 
   const [mappingIds, setMappingIds] = useState([]);
   const [mappingId, setMappingId] = useState('');
-  const mappingEndpoint = mappingId ? `/penyelesaian/${mappingId}/mapping` : '';
   const localMappingKey = `penyelesaian-column-mapping:${surveiId || spreadsheetId}`;
 
   useEffect(() => {
@@ -441,14 +443,21 @@ export default function PenyelesaianDetail() {
   }, [selectedSheetKeys, sources]);
   const mergeMappings = useMemo(() => ({ ...columnMappings, ...Object.fromEntries(Object.entries(keyMappings).map(([sourceKey, value]) => [`${sourceKey}::key`, value])) }), [columnMappings, keyMappings]);
   const merged = useMemo(() => mergeLkRows(activeSources, selectedKey, mergeMappings), [activeSources, mergeMappings, selectedKey]);
-  const detectedStatusColumns = useMemo(() => detectStatusColumns(headers, merged.rows), [headers, merged.rows]);
-  const detectedDateColumns = useMemo(() => detectDateColumns(headers, merged.rows), [headers, merged.rows]);
+
+  // FIX: Menyematkan ID yang stabil dan unik sejak awal data dibuat
+  const mergedRowsWithIds = useMemo(() => {
+    return merged.rows.map((row, index) => ({ ...row, _stableId: `row-${index}` }));
+  }, [merged.rows]);
+
+  const detectedStatusColumns = useMemo(() => detectStatusColumns(headers, mergedRowsWithIds), [headers, mergedRowsWithIds]);
+  const detectedDateColumns = useMemo(() => detectDateColumns(headers, mergedRowsWithIds), [headers, mergedRowsWithIds]);
   const detectedNoteColumns = useMemo(() => detectNoteColumns(headers), [headers]);
   const effectiveStatusHeader = statusColumnChoice || merged.statusHeader || '';
   const effectiveDateHeader = dateColumnChoice || merged.dateHeader || '';
   const effectiveNoteHeader = noteColumnChoice || detectedNoteColumns[0] || '';
   const getRowCompletion = (row) => isCompleted(effectiveStatusHeader ? { ...row, 'Status Penyelesaian': row[effectiveStatusHeader] } : row);
   const visibleHeaders = headers.filter((header) => !['status_penyelesaian', 'tanggal_selesai'].includes(normalizeHeader(header)) && !hiddenColumns.includes(header));
+  
   const filteredRows = useMemo(() => {
     const matchesStatus = (row) => {
       const completed = isCompleted(effectiveStatusHeader ? { ...row, 'Status Penyelesaian': row[effectiveStatusHeader] } : row);
@@ -474,8 +483,8 @@ export default function PenyelesaianDetail() {
       });
     };
 
-    return merged.rows.filter((row) => matchesStatus(row) && matchesSearch(row) && matchesColumnFilters(row));
-  }, [columnFilters, effectiveStatusHeader, merged.rows, searchTerm, statusFilter]);
+    return mergedRowsWithIds.filter((row) => matchesStatus(row) && matchesSearch(row) && matchesColumnFilters(row));
+  }, [columnFilters, effectiveStatusHeader, mergedRowsWithIds, searchTerm, statusFilter]);
 
   const stats = useMemo(() => {
     const completed = filteredRows.filter((row) => isCompleted(effectiveStatusHeader ? { ...row, 'Status Penyelesaian': row[effectiveStatusHeader] } : row)).length;
@@ -484,11 +493,11 @@ export default function PenyelesaianDetail() {
 
   const headerOptions = useMemo(() => {
     return visibleHeaders.reduce((acc, header) => {
-      const uniqueValues = [...new Set(merged.rows.map((row) => asText(row[header])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'id'));
+      const uniqueValues = [...new Set(mergedRowsWithIds.map((row) => asText(row[header])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'id'));
       acc[header] = uniqueValues;
       return acc;
     }, {});
-  }, [merged.rows, visibleHeaders]);
+  }, [mergedRowsWithIds, visibleHeaders]);
 
   const sortedRows = useMemo(() => {
     if (!sortConfig.key) return filteredRows;
@@ -507,6 +516,16 @@ export default function PenyelesaianDetail() {
 
     return rows;
   }, [filteredRows, sortConfig]);
+
+  // FIX: Reset halaman ke-1 setiap kali kriteria berubah
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, columnFilters, sortConfig]);
+
+  // FIX: Pembagian data tabel ke dalam blok paginasi
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedRows = sortedRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const handleColumnFilterToggle = (header, value) => {
     setColumnFilters((current) => {
@@ -767,7 +786,6 @@ export default function PenyelesaianDetail() {
       )}
 
       <section className="relative md:sticky md:top-3 z-30 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
-        {/* Bagian Atas Mobile: Search Bar + Tombol Buka/Tutup Filter */}
         <div className="flex w-full items-center gap-2 md:w-auto md:flex-1">
           <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-3 text-slate-400" size={17} />
@@ -788,7 +806,6 @@ export default function PenyelesaianDetail() {
           </button>
         </div>
 
-        {/* Kontainer Filter Tambahan: Disembunyikan di mobile secara default, selalu tampil di desktop */}
         <div className={`w-full flex-col gap-3 md:w-auto md:flex-row md:items-center ${showMobileFilters ? 'flex' : 'hidden md:flex'}`}>
           <label className="flex w-full flex-col text-xs font-semibold uppercase tracking-wider text-slate-500 md:w-auto md:block">
             Status
@@ -968,7 +985,7 @@ export default function PenyelesaianDetail() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
         <div ref={tableViewportRef} className="overflow-auto" style={{ maxHeight: '72vh' }}>
           <table className="min-w-full table-fixed border-collapse text-left text-sm">
             <thead className="sticky top-0 z-20 bg-slate-900 text-white">
@@ -1003,9 +1020,11 @@ export default function PenyelesaianDetail() {
             </thead>
 
             <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-              {sortedRows.map((row, index) => {
+              {paginatedRows.map((row) => {
                 const completed = getRowCompletion(row);
-                const rowKeyValue = `${row._spreadsheetId ?? row[selectedKey] ?? 'row'}-${row._sourceRowIndex ?? index}`;
+                // FIX: Menggunakan kunci yang stabil berdasarkan data sumber agar filter berfungsi
+                const rowKeyValue = row._stableId;
+                
                 return (
                   <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
                     <td className="sticky left-0 z-10 bg-inherit px-4 py-3 align-top font-semibold">
@@ -1046,7 +1065,30 @@ export default function PenyelesaianDetail() {
             </tbody>
           </table>
 
-          {sortedRows.length === 0 && <div className="p-10 text-center text-slate-500">Tidak ada data sesuai filter.</div>}
+          {paginatedRows.length === 0 && <div className="p-10 text-center text-slate-500">Tidak ada data sesuai filter.</div>}
+        </div>
+        
+        {/* FIX: Kontrol paginasi diletakkan di bawah porsi tabel */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={safePage === 1}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ChevronLeft size={16} /> Sebelumnya
+          </button>
+          <div className="text-sm font-medium text-slate-600">
+            Halaman {safePage} dari {totalPages}
+          </div>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={safePage === totalPages}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Selanjutnya <ChevronRight size={16} />
+          </button>
         </div>
       </div>
 
