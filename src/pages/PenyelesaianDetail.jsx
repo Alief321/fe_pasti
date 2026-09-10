@@ -7,7 +7,7 @@ import { findDefaultKey, isCompleted, mergeLkRows, normalizeHeader } from '../ut
 
 const EMPTY_FILTER_VALUE = '__EMPTY__';
 const STANDARD_COLUMNS = ['Status Penyelesaian', 'Tanggal Selesai', 'Catatan'];
-const PAGE_SIZE = 50; // Batas paginasi untuk mengatasi lag pada data besar
+const PAGE_SIZE = 50; 
 
 const handleShareLink = async () => {
   try {
@@ -223,6 +223,7 @@ export default function PenyelesaianDetail() {
   const [error, setError] = useState('');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedRows, setExpandedRows] = useState(new Set());
   
   const tableViewportRef = useRef(null);
   const publicDetail = !authenticated && Boolean(spreadsheetId) && !surveiId;
@@ -231,8 +232,6 @@ export default function PenyelesaianDetail() {
   const [mappingIds, setMappingIds] = useState([]);
   const [mappingId, setMappingId] = useState('');
   const localMappingKey = `penyelesaian-column-mapping:${surveiId || spreadsheetId}`;
-
-  const [expandedRows, setExpandedRows] = useState(new Set());
 
   const toggleRowExpand = (rowId) => {
     setExpandedRows((prev) => {
@@ -447,15 +446,21 @@ export default function PenyelesaianDetail() {
     }
   }
 
-  const headers = useMemo(() => [...new Set(sources.flatMap((source) => source.headers.map((header) => columnMappings[source.sourceKey]?.[header] || header)))], [columnMappings, sources]);
+  // REVISI PENTING: activeSources diinisialisasi duluan sebelum headers
   const sheetOptions = useMemo(() => sources.map((source) => ({ key: source.sourceKey, label: `${source.label} / ${source.sheetName}` })), [sources]);
+  
   const activeSources = useMemo(() => {
     return sources.filter((source) => selectedSheetKeys.includes(source.sourceKey));
   }, [selectedSheetKeys, sources]);
+
+  // REVISI PENTING: headers diambil hanya dari activeSources, bukan seluruh sources
+  const headers = useMemo(() => {
+    return [...new Set(activeSources.flatMap((source) => source.headers.map((header) => columnMappings[source.sourceKey]?.[header] || header)))];
+  }, [columnMappings, activeSources]);
+  
   const mergeMappings = useMemo(() => ({ ...columnMappings, ...Object.fromEntries(Object.entries(keyMappings).map(([sourceKey, value]) => [`${sourceKey}::key`, value])) }), [columnMappings, keyMappings]);
   const merged = useMemo(() => mergeLkRows(activeSources, selectedKey, mergeMappings), [activeSources, mergeMappings, selectedKey]);
 
-  // FIX: Menyematkan ID yang stabil dan unik sejak awal data dibuat
   const mergedRowsWithIds = useMemo(() => {
     return merged.rows.map((row, index) => ({ ...row, _stableId: `row-${index}` }));
   }, [merged.rows]);
@@ -528,12 +533,10 @@ export default function PenyelesaianDetail() {
     return rows;
   }, [filteredRows, sortConfig]);
 
-  // FIX: Reset halaman ke-1 setiap kali kriteria berubah
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter, columnFilters, sortConfig]);
 
-  // FIX: Pembagian data tabel ke dalam blok paginasi
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedRows = sortedRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -998,10 +1001,10 @@ export default function PenyelesaianDetail() {
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
         <div ref={tableViewportRef} className="overflow-auto" style={{ maxHeight: '72vh' }}>
-          <table className="min-w-full table-fixed border-collapse text-left text-sm">
-            <thead className="sticky top-0 z-20 bg-slate-900 text-white">
+          <table className="min-w-full table-fixed border-collapse text-left text-sm relative">
+            <thead className="sticky top-0 z-30 bg-slate-900 text-white shadow-sm">
               <tr>
-                <th className="sticky left-0 z-20 w-40 bg-slate-900 px-4 py-3 text-left align-top">Status</th>
+                <th className="sticky left-0 z-30 w-40 bg-slate-900 px-4 py-3 text-left align-top">Status</th>
                 {visibleHeaders.map((header, headerIndex) => {
                   const isFrozen = headerIndex < freezeColumnsCount;
                   const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
@@ -1034,14 +1037,14 @@ export default function PenyelesaianDetail() {
             {paginatedRows.map((row) => {
               const completed = getRowCompletion(row);
               const rowKeyValue = row._stableId;
-              const isExpanded = expandedRows.has(rowKeyValue); // Cek status accordion
+              const isExpanded = expandedRows.has(rowKeyValue);
               
               return (
                 <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
                   
-                  {/* Kolom Status dengan tombol Expand */}
-                  <td className="sticky left-0 z-10 bg-inherit px-4 py-3 align-top font-semibold">
-                    <div className="flex flex-col gap-2">
+                  {/* REVISI PENTING: td dibuat p-0 agar inner div bisa nempel (sticky) di top */}
+                  <td className="sticky left-0 z-20 bg-inherit p-0 align-top font-semibold border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">
+                    <div className="sticky top-[46px] p-4 flex flex-col gap-2 w-40 max-h-max">
                       <label className="flex items-center gap-2 cursor-pointer">
                         {canUpdateStatus && <input type="checkbox" checked={completed} onChange={() => handleStatusChange(row)} className="shrink-0 mt-0.5" />}
                         <span className={completed ? 'text-emerald-700' : 'text-amber-700'}>{completed ? 'Selesai' : 'Tindak lanjut'}</span>
@@ -1049,25 +1052,24 @@ export default function PenyelesaianDetail() {
                       <button
                         type="button"
                         onClick={() => toggleRowExpand(rowKeyValue)}
-                        className="text-[11px] font-bold text-blue-600 hover:underline text-left mt-1 w-max"
+                        className="text-[11px] font-bold text-blue-600 hover:underline text-left w-max"
                       >
                         {isExpanded ? 'Lebih ringkas' : 'Lihat semua'}
                       </button>
                     </div>
                   </td>
 
-                  {/* Kolom Konten dengan pembatasan line-clamp */}
+                  {/* Kolom Konten dengan pembatasan line-clamp lebih ketat */}
                   {visibleHeaders.map((header, headerIndex) => {
                     const isFrozen = headerIndex < freezeColumnsCount;
                     const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
                     return (
                       <td
                         key={`${rowKeyValue}-${header}`}
-                        className="px-4 py-3 align-top text-slate-700 transition-all"
-                        style={{ maxWidth: '280px', overflowWrap: 'anywhere', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 5, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
+                        className="px-4 py-4 align-top text-slate-700"
+                        style={{ maxWidth: '280px', minWidth: '150px', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 15, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
                       >
-                        {/* Div pembungkus untuk memotong teks panjang jika tidak di-expand */}
-                        <div className={`${isExpanded ? '' : 'line-clamp-3 overflow-hidden text-ellipsis'}`}>
+                        <div className={`${isExpanded ? '' : 'line-clamp-2 overflow-hidden'}`} style={{ wordBreak: 'break-word' }}>
                           {isLinkColumn(header) && row[header] ? (
                             <a href={row[header]} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100 hover:underline">
                               Buka link
@@ -1075,15 +1077,15 @@ export default function PenyelesaianDetail() {
                           ) : isMetadataColumn(header) ? (
                             <span className="inline-flex rounded-lg bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">{row[header] || '-'}</span>
                           ) : (
-                            <span className="block leading-relaxed">{String(row[header] ?? '-')}</span>
+                            <span className="block leading-relaxed whitespace-pre-wrap">{String(row[header] ?? '-')}</span>
                           )}
                         </div>
                       </td>
                     );
                   })}
 
-                  <td className="whitespace-normal px-4 py-3 align-top text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
-                    <div className={`${isExpanded ? '' : 'line-clamp-3 overflow-hidden text-ellipsis'}`}>
+                  <td className="whitespace-normal px-4 py-4 align-top text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
+                    <div className={`${isExpanded ? '' : 'line-clamp-2 overflow-hidden'}`}>
                       {row._sources?.join(', ')}
                     </div>
                   </td>
@@ -1096,7 +1098,6 @@ export default function PenyelesaianDetail() {
           {paginatedRows.length === 0 && <div className="p-10 text-center text-slate-500">Tidak ada data sesuai filter.</div>}
         </div>
         
-        {/* FIX: Kontrol paginasi diletakkan di bawah porsi tabel */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
           <button
             type="button"
@@ -1138,7 +1139,7 @@ function ColumnFilterMenu({ header, options, selectedValues, open, onToggleOpen,
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-40 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter {header}</p>
             <button type="button" onClick={onClear} className="text-[11px] font-medium text-blue-600 hover:underline">
