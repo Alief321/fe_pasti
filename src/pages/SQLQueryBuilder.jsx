@@ -84,12 +84,16 @@ async function normalizeSchema(item) {
     if (!response.ok) throw new Error(`JSON skema gagal dimuat (${response.status}).`);
     payload = await response.json();
   }
+  
+  // Ambil nama dari payload, lalu item, atau beri nilai default
+  const schemaName = item?.nama_skema || item?.name || payload?.name || item?.filename || 'Skema tanpa nama';
+  
   return payload?.tables?.length
     ? {
         ...payload,
         id: item?.id ?? payload.id,
         id_survei: item?.id_survei ?? item?.survei_id ?? payload.id_survei,
-        name: item?.nama_skema || item?.name || item?.filename || payload.name || 'Skema tanpa nama',
+        name: schemaName,
       }
     : null;
 }
@@ -193,6 +197,7 @@ export default function SQLQueryBuilder() {
   const [schemaForm, setSchemaForm] = useState({ name: '', surveyId: '', json: '' });
   const [schemaFile, setSchemaFile] = useState(null);
   const [schemaSaving, setSchemaSaving] = useState(false);
+  
   const [selectedTable, setSelectedTable] = useState(() => getStoredSchema().tables[0].name);
   const [selectedColumns, setSelectedColumns] = useState(['bt.id_penduduk', 'bt.nama_lengkap']);
   const [joins, setJoins] = useState([]);
@@ -268,7 +273,11 @@ export default function SQLQueryBuilder() {
   function openSchemaModal(item = null) {
     setEditingSchemaId(item?.id || null);
     setSchemaFile(null);
-    setSchemaForm({ name: item?.name || '', surveyId: item?.id_survei || item?.survei_id || selectedSurveyId || '', json: JSON.stringify(item ? getSchemaPayload(item) : schema, null, 2) });
+    setSchemaForm({ 
+      name: item?.name || item?.nama_skema || '', // Mengambil name atau nama_skema
+      surveyId: item?.id_survei || item?.survei_id || selectedSurveyId || '', 
+      json: JSON.stringify(item ? getSchemaPayload(item) : schema, null, 2) 
+    });
     setIsSchemaModalOpen(true);
   }
 
@@ -285,12 +294,15 @@ export default function SQLQueryBuilder() {
     setSchemaSaving(true);
     try {
       const formData = new FormData();
-      formData.append('nama_skema', schemaForm.name.trim() || 'Skema baru');
+      const finalName = schemaForm.name.trim() || 'Skema tanpa nama'; // Gunakan default name yg sama dengan normalizer
+      formData.append('nama_skema', finalName);
       formData.append('id_survei', schemaForm.surveyId);
       formData.append('skema_json', JSON.stringify(parsed));
       if (schemaFile) formData.append('file', schemaFile);
+      
       const response = editingSchemaId ? await api.put(`/skema/${editingSchemaId}`, formData) : await api.post('/skema', formData);
-      const saved = (await normalizeSchema(response.data?.data || response.data)) || { ...parsed, id: editingSchemaId, name: schemaForm.name || 'Skema baru' };
+      const saved = (await normalizeSchema(response.data?.data || response.data)) || { ...parsed, id: editingSchemaId, name: finalName };
+      
       setSchemas((current) => (editingSchemaId ? current.map((item) => (item.id === editingSchemaId ? saved : item)) : [...current, saved]));
       setSelectedSurveyId(schemaForm.surveyId);
       applySchema(saved, saved.id || editingSchemaId || 'local');
@@ -319,7 +331,11 @@ export default function SQLQueryBuilder() {
     const orderedNames = [selectedTable, ...joinedTableNames, ...schema.tables.map((item) => item.name)];
     return Object.fromEntries([...new Set(orderedNames)].map((name, index) => [name, getTableAlias(index)]));
   }, [joinedTableNames, schema.tables, selectedTable]);
+  
+  // Semua tabel yg belum tergabung di join (bebas dari base table / root)
   const availableJoinTables = schema.tables.filter((item) => item.name !== selectedTable && !joinedTableNames.includes(item.name));
+  
+  // Mengumpulkan source table untuk autocomplete 
   const sourceTables = [selectedTable, ...joinedTableNames].map((name) => schema.tables.find((item) => item.name === name)).filter(Boolean);
   const sourceColumns = sourceTables.flatMap((source) => source.columns.map((column) => ({ ...column, table: source.name, alias: tableAliases[source.name], qualified: `${tableAliases[source.name]}.${column.name}` })));
 
@@ -404,6 +420,15 @@ export default function SQLQueryBuilder() {
         return { ...group, conditions: group.conditions.filter((condition) => condition.id !== conditionId) };
       }),
     );
+  }
+
+  // Set tabel utama baru dengan manual (tombol Set Utama)
+  function setBaseTable(tableName) {
+    if (tableName === selectedTable) return;
+    setSelectedTable(tableName);
+    setSelectedColumns([]); // Kosongkan yang dipilih sebelumnya
+    setJoins([]); // Reset Joins karena base table terganti
+    setExpandedTables((current) => ({ ...current, [tableName]: true }));
   }
 
   function importSchema(event) {
@@ -507,8 +532,8 @@ export default function SQLQueryBuilder() {
       </section>
 
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(420px,1fr)_390px]">
-        <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-4">
+        <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col max-h-[85vh]">
+          <div className="border-b border-slate-100 p-4 shrink-0">
             <div className="flex items-center gap-2 font-semibold text-slate-900">
               <Table2 size={18} className="text-cyan-600" /> Skema database
             </div>
@@ -516,7 +541,7 @@ export default function SQLQueryBuilder() {
               {schema.tables.length} tabel dari {schema.source || 'file impor'}
             </p>
           </div>
-          <div className="border-b border-slate-100 p-3">
+          <div className="border-b border-slate-100 p-3 shrink-0">
             <div className="relative">
               <Search size={15} className="absolute left-3 top-2.5 text-slate-400" />
               <input
@@ -527,48 +552,70 @@ export default function SQLQueryBuilder() {
               />
             </div>
           </div>
-          <div className="max-h-140 overflow-auto p-3">
-            {schema.tables.map((item) => (
-              <div key={item.name} className="mb-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedTable(item.name);
-                    setSelectedColumns([]);
-                    setExpandedTables((current) => ({ ...current, [item.name]: !current[item.name] }));
-                  }}
-                  className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-bold ${selectedTable === item.name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-700 hover:bg-slate-50'}`}
-                >
-                  <span className="flex items-center gap-2">
-                    <ChevronDown size={14} className={`transition-transform ${expandedTables[item.name] ? '' : '-rotate-90'}`} /> {item.name}
-                  </span>
-                  <span className="text-[11px] font-normal text-slate-400">{item.columns.length}</span>
-                </button>
-                {expandedTables[item.name] && (
-                  <div className="mt-1 space-y-1 pl-2">
-                    {item.columns
-                      .filter((column) => column.name.toLowerCase().includes(search.toLowerCase()))
-                      .map((column) => (
-                        <button
-                          type="button"
-                          draggable
-                          onDragStart={(event) => event.dataTransfer.setData('column', `${tableAliases[item.name]}.${column.name}`)}
-                          onClick={() => toggleColumn(`${tableAliases[item.name]}.${column.name}`)}
-                          key={column.name}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${selectedColumns.includes(`${tableAliases[item.name]}.${column.name}`) ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+          <div className="flex-1 overflow-auto p-3 relative bg-slate-50/30">
+            {schema.tables.map((item) => {
+              const isBaseTable = selectedTable === item.name;
+              
+              return (
+                <div key={item.name} className="mb-4 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                  {/* Sticky header untuk nama tabel */}
+                  <div className={`sticky top-0 z-10 flex w-full items-center justify-between border-b px-2 py-2 text-left text-sm font-bold bg-white
+                    ${isBaseTable ? 'border-cyan-200 bg-cyan-50/50' : 'border-slate-100'}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedTables((current) => ({ ...current, [item.name]: !current[item.name] }));
+                      }}
+                      className={`flex flex-1 items-center gap-2 outline-none ${isBaseTable ? 'text-cyan-800' : 'text-slate-700'}`}
+                    >
+                      <ChevronDown size={14} className={`transition-transform text-slate-400 ${expandedTables[item.name] ? '' : '-rotate-90'}`} />
+                      {item.name}
+                    </button>
+                    
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-normal text-slate-400 mr-1">{item.columns.length}</span>
+                      {!isBaseTable && (
+                        <button 
+                          onClick={() => setBaseTable(item.name)}
+                          title="Jadikan tabel utama (FROM)"
+                          className="text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-cyan-600 bg-slate-100 hover:bg-cyan-100 px-1.5 py-0.5 rounded"
                         >
-                          <GripVertical size={13} className="text-slate-300" /> <span className="min-w-0 flex-1 truncate">{column.name}</span>
-                          <span className="text-[10px] text-slate-400">{column.type}</span>
+                          Set Utama
                         </button>
-                      ))}
+                      )}
+                      {isBaseTable && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-600 bg-cyan-100 px-1.5 py-0.5 rounded">Utama</span>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+                  
+                  {expandedTables[item.name] && (
+                    <div className="space-y-1 p-2 bg-white">
+                      {item.columns
+                        .filter((column) => column.name.toLowerCase().includes(search.toLowerCase()))
+                        .map((column) => (
+                          <button
+                            type="button"
+                            draggable
+                            onDragStart={(event) => event.dataTransfer.setData('column', `${tableAliases[item.name]}.${column.name}`)}
+                            onClick={() => toggleColumn(`${tableAliases[item.name]}.${column.name}`)}
+                            key={column.name}
+                            className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${selectedColumns.includes(`${tableAliases[item.name]}.${column.name}`) ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}
+                          >
+                            <GripVertical size={13} className="text-slate-300" /> <span className="min-w-0 flex-1 truncate">{column.name}</span>
+                            <span className="text-[10px] text-slate-400">{column.type}</span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div className="border-t border-slate-100 p-4 text-xs leading-relaxed text-slate-500">
+          <div className="border-t border-slate-100 p-4 text-xs leading-relaxed text-slate-500 shrink-0">
             <FileJson size={15} className="mb-1 text-cyan-600" />
-            SQLab cukup mengirim JSON berisi `tables`, `columns`, `name`, dan `type`.
+            Klik Set Utama untuk mengganti tabel dasar (FROM). Buka-tutup akordeon tidak me-reset tabel.
           </div>
         </aside>
 
@@ -669,15 +716,15 @@ export default function SQLQueryBuilder() {
                           { value: '', label: 'Tabel tujuan' },
                           ...schema.tables
                             .filter((item) => item.name !== selectedTable && (item.name === join.table || !joinedTableNames.includes(item.name)))
-                            .map((item) => ({ value: item.name, label: `${tableAliases[item.name]} (${item.name})` })),
+                            .map((item) => ({ value: item.name, label: `${tableAliases[item.name] || 'tj'} (${item.name})` })),
                         ]}
                         placeholder="Tabel tujuan"
                       />
                       <SearchableSelect
                         value={join.right}
                         onChange={(value) => updateJoin(join.id, 'right', value)}
-                        options={[{ value: '', label: `Kolom kanan (${tableAliases[join.table]})` }, ...joinTable.columns.map((column) => ({ value: column.name, label: `${tableAliases[join.table]}.${column.name}` }))]}
-                        placeholder={`Kolom kanan (${tableAliases[join.table]})`}
+                        options={[{ value: '', label: `Kolom kanan (${tableAliases[join.table] || 'tj'})` }, ...joinTable.columns.map((column) => ({ value: column.name, label: `${tableAliases[join.table] || 'tj'}.${column.name}` }))]}
+                        placeholder={`Kolom kanan (${tableAliases[join.table] || 'tj'})`}
                       />
                       <button type="button" onClick={() => setJoins((current) => current.filter((item) => item.id !== join.id))} className="flex items-center justify-center text-slate-400 hover:text-rose-500" aria-label="Hapus JOIN">
                         <Trash2 size={15} />
@@ -721,7 +768,7 @@ export default function SQLQueryBuilder() {
                       <SearchableSelect
                         value={condition.column}
                         onChange={(value) => updateCondition(group.id, condition.id, 'column', value)}
-                        options={[{ value: '', label: 'Pilih kolom' }, ...table.columns.map((column) => column.name)]}
+                        options={[{ value: '', label: 'Pilih kolom' }, ...sourceColumns.map((column) => column.name)]}
                         placeholder="Pilih kolom"
                       />
                       <SearchableSelect value={condition.operator} onChange={(value) => updateCondition(group.id, condition.id, 'operator', value)} options={operators} placeholder="Operator" />
@@ -906,7 +953,7 @@ export default function SQLQueryBuilder() {
         </section>
 
         <aside className="flex min-h-155 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#101827] shadow-xl">
-          <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+          <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4 shrink-0">
             <div>
               <div className="flex items-center gap-2 text-sm font-bold text-white">
                 <Layers3 size={17} className="text-cyan-400" /> Preview query
@@ -921,13 +968,14 @@ export default function SQLQueryBuilder() {
           <pre className="flex-1 overflow-auto p-5 font-mono text-xs leading-6 text-cyan-100">
             <code>{sql}</code>
           </pre>
-          <div className="border-t border-slate-700 bg-slate-900/60 px-5 py-4 text-xs text-slate-400">Query ini siap ditempel ke SQLab atau disimpan sebagai pemeriksaan baru.</div>
+          <div className="border-t border-slate-700 bg-slate-900/60 px-5 py-4 text-xs text-slate-400 shrink-0">Query ini siap ditempel ke SQLab atau disimpan sebagai pemeriksaan baru.</div>
         </aside>
       </div>
+      
       {isSchemaModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-4">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-4 shrink-0">
               <div>
                 <h2 className="font-bold text-slate-900">{editingSchemaId ? 'Edit skema' : 'Upload skema baru'}</h2>
                 <p className="text-xs text-slate-500">Tempel JSON struktur tabel, lalu simpan ke database.</p>
@@ -936,57 +984,58 @@ export default function SQLQueryBuilder() {
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={saveServerSchema} className="min-h-0 space-y-4 overflow-y-auto p-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-sm font-semibold text-slate-700">
-                  Nama skema
+            <form onSubmit={saveServerSchema} className="flex flex-col min-h-0 overflow-hidden flex-1">
+              <div className="overflow-y-auto p-5 space-y-4 flex-1">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm font-semibold text-slate-700">
+                    Nama skema
+                    <input
+                      required
+                      value={schemaForm.name}
+                      onChange={(event) => setSchemaForm((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="Contoh: Skema Penduduk 2026"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-normal outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                    />
+                  </label>
+                  <label className="text-sm font-semibold text-slate-700">
+                    Survei
+                    <SearchableSelect
+                      required
+                      value={schemaForm.surveyId}
+                      onChange={(value) => setSchemaForm((current) => ({ ...current, surveyId: value }))}
+                      options={[{ value: '', label: 'Pilih survei' }, ...surveys.map((survey) => ({ value: survey.id, label: survey.nama_survei }))]}
+                      placeholder="Pilih survei"
+                      className="mt-1 w-full font-normal"
+                    />
+                  </label>
+                </div>
+                <label className="block text-sm font-semibold text-slate-700">
+                  File JSON (opsional)
                   <input
-                    required
-                    value={schemaForm.name}
-                    onChange={(event) => setSchemaForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Contoh: Skema Penduduk 2026"
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-normal outline-none focus:border-cyan-400"
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      setSchemaFile(file || null);
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setSchemaForm((current) => ({ ...current, name: current.name || file.name.replace(/\.json$/i, ''), json: String(reader.result) }));
+                      reader.readAsText(file);
+                    }}
+                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-normal text-slate-600"
                   />
                 </label>
-                <label className="text-sm font-semibold text-slate-700">
-                  Survei
-                  <SearchableSelect
+                <label className="block text-sm font-semibold text-slate-700 h-full flex flex-col min-h-[250px]">
+                  JSON skema
+                  <textarea
                     required
-                    value={schemaForm.surveyId}
-                    onChange={(value) => setSchemaForm((current) => ({ ...current, surveyId: value }))}
-                    options={[{ value: '', label: 'Pilih survei' }, ...surveys.map((survey) => ({ value: survey.id, label: survey.nama_survei }))]}
-                    placeholder="Pilih survei"
-                    className="mt-1 w-full font-normal"
+                    value={schemaForm.json}
+                    onChange={(event) => setSchemaForm((current) => ({ ...current, json: event.target.value }))}
+                    className="mt-1 w-full flex-1 rounded-lg border border-slate-200 bg-slate-950 p-3 font-mono text-xs leading-5 text-cyan-100 outline-none focus:border-cyan-400 min-h-[150px] resize-none"
                   />
                 </label>
               </div>
-              <label className="block text-sm font-semibold text-slate-700">
-                File JSON (opsional)
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    setSchemaFile(file || null);
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = () => setSchemaForm((current) => ({ ...current, name: current.name || file.name.replace(/\.json$/i, ''), json: String(reader.result) }));
-                    reader.readAsText(file);
-                  }}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-normal text-slate-600"
-                />
-              </label>
-              <label className="block text-sm font-semibold text-slate-700">
-                JSON skema
-                <textarea
-                  required
-                  rows={14}
-                  value={schemaForm.json}
-                  onChange={(event) => setSchemaForm((current) => ({ ...current, json: event.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-950 p-3 font-mono text-xs leading-5 text-cyan-100 outline-none focus:border-cyan-400"
-                />
-              </label>
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 border-t border-slate-100 p-4 shrink-0 bg-white">
                 <button type="button" onClick={() => setIsSchemaModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
                   Batal
                 </button>
