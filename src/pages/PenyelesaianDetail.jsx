@@ -223,7 +223,9 @@ export default function PenyelesaianDetail() {
   const [error, setError] = useState('');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [expandedRows, setExpandedRows] = useState(new Set());
+  
+  // FIX: Menggunakan Object sebagai dictionary agar React mendeteksi perubahan dengan sempurna
+  const [expandedRows, setExpandedRows] = useState({});
   
   const tableViewportRef = useRef(null);
   const publicDetail = !authenticated && Boolean(spreadsheetId) && !surveiId;
@@ -234,12 +236,10 @@ export default function PenyelesaianDetail() {
   const localMappingKey = `penyelesaian-column-mapping:${surveiId || spreadsheetId}`;
 
   const toggleRowExpand = (rowId) => {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId);
-      else next.add(rowId);
-      return next;
-    });
+    setExpandedRows((prev) => ({
+      ...prev,
+      [rowId]: !prev[rowId]
+    }));
   };
 
   useEffect(() => {
@@ -446,14 +446,12 @@ export default function PenyelesaianDetail() {
     }
   }
 
-  // REVISI PENTING: activeSources diinisialisasi duluan sebelum headers
   const sheetOptions = useMemo(() => sources.map((source) => ({ key: source.sourceKey, label: `${source.label} / ${source.sheetName}` })), [sources]);
   
   const activeSources = useMemo(() => {
     return sources.filter((source) => selectedSheetKeys.includes(source.sourceKey));
   }, [selectedSheetKeys, sources]);
 
-  // REVISI PENTING: headers diambil hanya dari activeSources, bukan seluruh sources
   const headers = useMemo(() => {
     return [...new Set(activeSources.flatMap((source) => source.headers.map((header) => columnMappings[source.sourceKey]?.[header] || header)))];
   }, [columnMappings, activeSources]);
@@ -799,7 +797,8 @@ export default function PenyelesaianDetail() {
         </section>
       )}
 
-      <section className="relative md:sticky md:top-3 z-30 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
+      {/* FIX Z-INDEX: Menggunakan z-50 pada header filter kontrol agar di atas tabel */}
+      <section className="relative md:sticky md:top-3 z-50 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
         <div className="flex w-full items-center gap-2 md:w-auto md:flex-1">
           <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-3 text-slate-400" size={17} />
@@ -840,7 +839,7 @@ export default function PenyelesaianDetail() {
             </button>
             
             {hiddenColumnsOpen && (
-              <div className="absolute left-0 top-full z-40 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl md:left-auto md:right-0 md:w-72">
+              <div className="absolute left-0 top-full z-[100] mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl md:left-auto md:right-0 md:w-72">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Tampilkan kolom</p>
                   <button type="button" onClick={() => setHiddenColumns([])} className="text-xs font-semibold text-blue-600">
@@ -999,7 +998,7 @@ export default function PenyelesaianDetail() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col relative z-10">
         <div ref={tableViewportRef} className="overflow-auto" style={{ maxHeight: '72vh' }}>
           <table className="min-w-full table-fixed border-collapse text-left text-sm relative">
             <thead className="sticky top-0 z-30 bg-slate-900 text-white shadow-sm">
@@ -1037,12 +1036,13 @@ export default function PenyelesaianDetail() {
             {paginatedRows.map((row) => {
               const completed = getRowCompletion(row);
               const rowKeyValue = row._stableId;
-              const isExpanded = expandedRows.has(rowKeyValue);
+              
+              // FIX: isExpanded mengambil status boolean yang kuat dari Object dictionary
+              const isExpanded = !!expandedRows[rowKeyValue];
               
               return (
                 <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
                   
-                  {/* REVISI PENTING: td dibuat p-0 agar inner div bisa nempel (sticky) di top */}
                   <td className="sticky left-0 z-20 bg-inherit p-0 align-top font-semibold border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">
                     <div className="sticky top-[46px] p-4 flex flex-col gap-2 w-40 max-h-max">
                       <label className="flex items-center gap-2 cursor-pointer">
@@ -1059,7 +1059,7 @@ export default function PenyelesaianDetail() {
                     </div>
                   </td>
 
-                  {/* Kolom Konten dengan pembatasan line-clamp lebih ketat */}
+                  {/* FIX: line-clamp-2 diterapkan dengan styling break-word kuat */}
                   {visibleHeaders.map((header, headerIndex) => {
                     const isFrozen = headerIndex < freezeColumnsCount;
                     const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
@@ -1069,7 +1069,7 @@ export default function PenyelesaianDetail() {
                         className="px-4 py-4 align-top text-slate-700"
                         style={{ maxWidth: '280px', minWidth: '150px', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 15, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
                       >
-                        <div className={`${isExpanded ? '' : 'line-clamp-2 overflow-hidden'}`} style={{ wordBreak: 'break-word' }}>
+                        <div className={`transition-all duration-200 ${isExpanded ? '' : 'line-clamp-2'}`} style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
                           {isLinkColumn(header) && row[header] ? (
                             <a href={row[header]} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100 hover:underline">
                               Buka link
@@ -1077,7 +1077,7 @@ export default function PenyelesaianDetail() {
                           ) : isMetadataColumn(header) ? (
                             <span className="inline-flex rounded-lg bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">{row[header] || '-'}</span>
                           ) : (
-                            <span className="block leading-relaxed whitespace-pre-wrap">{String(row[header] ?? '-')}</span>
+                            <span className="leading-relaxed">{String(row[header] ?? '-')}</span>
                           )}
                         </div>
                       </td>
@@ -1085,7 +1085,7 @@ export default function PenyelesaianDetail() {
                   })}
 
                   <td className="whitespace-normal px-4 py-4 align-top text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
-                    <div className={`${isExpanded ? '' : 'line-clamp-2 overflow-hidden'}`}>
+                    <div className={`transition-all duration-200 ${isExpanded ? '' : 'line-clamp-2'}`}>
                       {row._sources?.join(', ')}
                     </div>
                   </td>
