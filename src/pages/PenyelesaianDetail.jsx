@@ -232,6 +232,17 @@ export default function PenyelesaianDetail() {
   const [mappingId, setMappingId] = useState('');
   const localMappingKey = `penyelesaian-column-mapping:${surveiId || spreadsheetId}`;
 
+  const [expandedRows, setExpandedRows] = useState(new Set());
+
+  const toggleRowExpand = (rowId) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -1020,29 +1031,43 @@ export default function PenyelesaianDetail() {
             </thead>
 
             <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-              {paginatedRows.map((row) => {
-                const completed = getRowCompletion(row);
-                // FIX: Menggunakan kunci yang stabil berdasarkan data sumber agar filter berfungsi
-                const rowKeyValue = row._stableId;
-                
-                return (
-                  <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
-                    <td className="sticky left-0 z-10 bg-inherit px-4 py-3 align-top font-semibold">
-                      <label className="flex items-center gap-2">
-                        {canUpdateStatus && <input type="checkbox" checked={completed} onChange={() => handleStatusChange(row)} />}
+            {paginatedRows.map((row) => {
+              const completed = getRowCompletion(row);
+              const rowKeyValue = row._stableId;
+              const isExpanded = expandedRows.has(rowKeyValue); // Cek status accordion
+              
+              return (
+                <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
+                  
+                  {/* Kolom Status dengan tombol Expand */}
+                  <td className="sticky left-0 z-10 bg-inherit px-4 py-3 align-top font-semibold">
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        {canUpdateStatus && <input type="checkbox" checked={completed} onChange={() => handleStatusChange(row)} className="shrink-0 mt-0.5" />}
                         <span className={completed ? 'text-emerald-700' : 'text-amber-700'}>{completed ? 'Selesai' : 'Tindak lanjut'}</span>
                       </label>
-                    </td>
+                      <button
+                        type="button"
+                        onClick={() => toggleRowExpand(rowKeyValue)}
+                        className="text-[11px] font-bold text-blue-600 hover:underline text-left mt-1 w-max"
+                      >
+                        {isExpanded ? 'Lebih ringkas' : 'Lihat semua'}
+                      </button>
+                    </div>
+                  </td>
 
-                    {visibleHeaders.map((header, headerIndex) => {
-                      const isFrozen = headerIndex < freezeColumnsCount;
-                      const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
-                      return (
-                        <td
-                          key={`${rowKeyValue}-${header}`}
-                          className="px-4 py-3 align-top text-slate-700"
-                          style={{ maxWidth: '280px', overflowWrap: 'anywhere', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 5, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
-                        >
+                  {/* Kolom Konten dengan pembatasan line-clamp */}
+                  {visibleHeaders.map((header, headerIndex) => {
+                    const isFrozen = headerIndex < freezeColumnsCount;
+                    const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
+                    return (
+                      <td
+                        key={`${rowKeyValue}-${header}`}
+                        className="px-4 py-3 align-top text-slate-700 transition-all"
+                        style={{ maxWidth: '280px', overflowWrap: 'anywhere', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 5, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
+                      >
+                        {/* Div pembungkus untuk memotong teks panjang jika tidak di-expand */}
+                        <div className={`${isExpanded ? '' : 'line-clamp-3 overflow-hidden text-ellipsis'}`}>
                           {isLinkColumn(header) && row[header] ? (
                             <a href={row[header]} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100 hover:underline">
                               Buka link
@@ -1052,16 +1077,19 @@ export default function PenyelesaianDetail() {
                           ) : (
                             <span className="block leading-relaxed">{String(row[header] ?? '-')}</span>
                           )}
-                        </td>
-                      );
-                    })}
+                        </div>
+                      </td>
+                    );
+                  })}
 
-                    <td className="whitespace-normal px-4 py-3 align-top text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
+                  <td className="whitespace-normal px-4 py-3 align-top text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
+                    <div className={`${isExpanded ? '' : 'line-clamp-3 overflow-hidden text-ellipsis'}`}>
                       {row._sources?.join(', ')}
-                    </td>
-                  </tr>
-                );
-              })}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             </tbody>
           </table>
 
