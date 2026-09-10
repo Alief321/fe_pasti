@@ -199,7 +199,15 @@ export default function SQLQueryBuilder() {
   const [schemaSaving, setSchemaSaving] = useState(false);
   
   const [selectedTable, setSelectedTable] = useState(() => getStoredSchema().tables[0].name);
-  const [selectedColumns, setSelectedColumns] = useState(['bt.id_penduduk', 'bt.nama_lengkap']);
+  
+  // STRUKTUR BARU UNTUK ALIAS: array of objects { qualified, alias }
+  const [selectedColumns, setSelectedColumns] = useState(() => 
+    getStoredSchema().tables[0].columns.slice(0, 2).map((column) => ({
+      qualified: `bt.${column.name}`,
+      alias: ''
+    }))
+  );
+  
   const [joins, setJoins] = useState([]);
   const [distinct, setDistinct] = useState(false);
   const [aggregate, setAggregate] = useState({ function: '', column: '' });
@@ -256,7 +264,10 @@ export default function SQLQueryBuilder() {
     setSelectedSchemaId(id);
     setSelectedTable(nextSchema.tables[0].name);
     setExpandedTables({ [nextSchema.tables[0].name]: true });
-    setSelectedColumns(nextSchema.tables[0].columns.slice(0, 2).map((column) => `bt.${column.name}`));
+    setSelectedColumns(nextSchema.tables[0].columns.slice(0, 2).map((column) => ({
+      qualified: `bt.${column.name}`,
+      alias: ''
+    })));
     setJoins([]);
     setGroups([makeGroup(firstColumn)]);
     setCaseColumn(firstColumn);
@@ -339,7 +350,11 @@ export default function SQLQueryBuilder() {
   const sourceColumns = sourceTables.flatMap((source) => source.columns.map((column) => ({ ...column, table: source.name, alias: tableAliases[source.name], qualified: `${tableAliases[source.name]}.${column.name}` })));
 
   const sql = useMemo(() => {
-    const selectFields = selectedColumns.length ? selectedColumns.map((column) => `  ${column}`) : ['  *'];
+    // GENERASI SQL: Terapkan Alias 'AS' jika diisi
+    const selectFields = selectedColumns.length 
+      ? selectedColumns.map((col) => col.alias ? `  ${col.qualified} AS ${col.alias}` : `  ${col.qualified}`) 
+      : ['  *'];
+      
     if (aggregate.function && aggregate.column)
       selectFields.push(
         `  ${aggregate.function}(${aggregate.column === '*' ? '*' : getQualifiedColumn(aggregate.column, tableAliases[selectedTable])}) AS ${aggregate.function.toLowerCase()}_${aggregate.column === '*' ? 'rows' : aggregate.column.split('.').pop()}`,
@@ -369,7 +384,6 @@ export default function SQLQueryBuilder() {
     return `SELECT\n${selectList}${caseSql}${expressionSql}\nFROM ${selectedTable} ${tableAliases[selectedTable]}${joinSql}${whereSql ? `\nWHERE ${whereSql}` : ''}${groupSql}${orderSql}${limitSql}${offsetSql};`;
   }, [aggregate, caseColumn, caseEnabled, distinct, expressions, groupBy, groups, joins, limit, offset, orderBy, orderDirection, selectedColumns, selectedTable, tableAliases]);
 
-  // Fungsi utilitas deteksi Join
   function findMatchingColumns(targetTableName) {
     const targetTable = schema.tables.find(t => t.name === targetTableName);
     if (!targetTable) return null;
@@ -382,14 +396,11 @@ export default function SQLQueryBuilder() {
     return null;
   }
 
-  // ALGORITMA: Pengecekan otomatis JOIN jika kolom dari tabel lain ditarik/diklik
   function handleColumnAdd(qualifiedColumn) {
     const [alias] = qualifiedColumn.split('.');
-    
-    // Cari nama tabel asli berdasarkan alias-nya
     const sourceTableName = Object.keys(tableAliases).find(key => tableAliases[key] === alias);
 
-    // Jika tabel bukan selectedTable (utama) dan belum pernah di join, maka kita auto-join
+    // Auto Join Logic
     if (sourceTableName && sourceTableName !== selectedTable && !joins.some(j => j.table === sourceTableName)) {
        const match = findMatchingColumns(sourceTableName);
        const joinTableObj = schema.tables.find(t => t.name === sourceTableName);
@@ -408,18 +419,26 @@ export default function SQLQueryBuilder() {
        }]);
     }
 
-    if (!selectedColumns.includes(qualifiedColumn)) {
-        setSelectedColumns(current => [...current, qualifiedColumn]);
-    }
+    // Insert column as object
+    setSelectedColumns(current => {
+       if (current.some(c => c.qualified === qualifiedColumn)) return current;
+       return [...current, { qualified: qualifiedColumn, alias: '' }];
+    });
   }
 
   function toggleColumn(columnName) {
     const qualified = columnName.includes('.') ? columnName : `${tableAliases[selectedTable]}.${columnName}`;
-    if (selectedColumns.includes(qualified)) {
-      setSelectedColumns((current) => current.filter((column) => column !== qualified));
+    if (selectedColumns.some((col) => col.qualified === qualified)) {
+      setSelectedColumns((current) => current.filter((col) => col.qualified !== qualified));
     } else {
       handleColumnAdd(qualified);
     }
+  }
+  
+  function updateColumnAlias(qualified, newAlias) {
+    setSelectedColumns(current => 
+      current.map(col => col.qualified === qualified ? { ...col, alias: newAlias.replace(/[^a-zA-Z0-9_]/g, '') } : col)
+    );
   }
 
   function addDroppedColumn(event) {
@@ -430,15 +449,15 @@ export default function SQLQueryBuilder() {
     handleColumnAdd(qualified);
   }
 
-  function reorderSelectedColumn(sourceColumn, targetColumn) {
-    if (!sourceColumn || sourceColumn === targetColumn) return;
+  function reorderSelectedColumn(sourceQualified, targetQualified) {
+    if (!sourceQualified || sourceQualified === targetQualified) return;
     setSelectedColumns((current) => {
-      const sourceIndex = current.indexOf(sourceColumn);
-      const targetIndex = current.indexOf(targetColumn);
+      const sourceIndex = current.findIndex(c => c.qualified === sourceQualified);
+      const targetIndex = current.findIndex(c => c.qualified === targetQualified);
       if (sourceIndex < 0 || targetIndex < 0) return current;
       const next = [...current];
-      next.splice(sourceIndex, 1);
-      next.splice(targetIndex - (sourceIndex < targetIndex ? 1 : 0), 0, sourceColumn);
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex - (sourceIndex < targetIndex ? 1 : 0), 0, moved);
       return next;
     });
   }
@@ -586,7 +605,7 @@ export default function SQLQueryBuilder() {
 
       <div className="grid gap-6 xl:grid-cols-[290px_minmax(460px,1fr)_400px]">
         
-        {/* PANEL KIRI (SKEMA) DENGAN PEMBATASAN OVERFLOW */}
+        {/* PANEL KIRI (SKEMA) */}
         <aside className="flex max-h-[85vh] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-200/50">
           <div className="shrink-0 border-b border-slate-100 p-5">
             <div className="flex items-center gap-2.5 font-bold text-slate-800">
@@ -611,7 +630,6 @@ export default function SQLQueryBuilder() {
             </div>
           </div>
           
-          {/* WADAH SCROLL UTAMA YANG MENGIZINKAN STICKY */}
           <div className="relative flex-1 overflow-y-auto bg-slate-50/30 p-3">
             {schema.tables.map((item) => {
               const isBaseTable = selectedTable === item.name;
@@ -656,7 +674,7 @@ export default function SQLQueryBuilder() {
                         .filter((column) => column.name.toLowerCase().includes(search.toLowerCase()))
                         .map((column) => {
                            const qualifiedCol = `${tableAliases[item.name]}.${column.name}`;
-                           const isSelected = selectedColumns.includes(qualifiedCol);
+                           const isSelected = selectedColumns.some(c => c.qualified === qualifiedCol);
 
                            return (
                             <button
@@ -686,12 +704,13 @@ export default function SQLQueryBuilder() {
         </aside>
 
         <section className="space-y-6">
+          {/* 01 / KOLOM HASIL & ALIAS */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/50">
             <div className="mb-5 flex items-start justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">01 / Kolom hasil</p>
                 <h2 className="mt-1 text-lg font-extrabold text-slate-900">Apa yang ingin ditampilkan?</h2>
-                <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-slate-500">Tarik nama kolom ke area ini. Jika berasal dari tabel berbeda, sistem otomatis membuat JOIN.</p>
+                <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-slate-500">Tarik nama kolom ke area ini. Anda juga bisa memberi nama Alias (AS) di setiap kolom.</p>
               </div>
               <span className="rounded-full bg-cyan-50 px-3 py-1 text-[12px] font-bold text-cyan-700 shadow-sm shadow-cyan-100">{selectedColumns.length} dipilih</span>
             </div>
@@ -699,29 +718,41 @@ export default function SQLQueryBuilder() {
             <div onDragOver={(event) => event.preventDefault()} onDrop={addDroppedColumn} className="min-h-40 rounded-xl border-2 border-dashed border-cyan-200/60 bg-gradient-to-br from-cyan-50/50 to-white p-4 transition-colors hover:border-cyan-300">
               {selectedColumns.length ? (
                 <div className="flex flex-wrap gap-2.5">
-                  {selectedColumns.map((column) => (
+                  {selectedColumns.map((col) => (
                     <div
-                      key={column}
+                      key={col.qualified}
                       draggable
-                      onDragStart={(event) => event.dataTransfer.setData('selected-column', column)}
+                      onDragStart={(event) => event.dataTransfer.setData('selected-column', col.qualified)}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        reorderSelectedColumn(event.dataTransfer.getData('selected-column'), column);
+                        reorderSelectedColumn(event.dataTransfer.getData('selected-column'), col.qualified);
                       }}
-                      className="group flex cursor-grab items-center gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2 text-[13px] font-bold text-slate-700 shadow-sm transition active:cursor-grabbing hover:border-cyan-300 hover:shadow"
+                      className="group flex cursor-grab items-center gap-2 rounded-xl border border-slate-200/80 bg-white p-1.5 pl-3 text-[13px] font-bold text-slate-700 shadow-sm transition active:cursor-grabbing hover:border-cyan-300 hover:shadow focus-within:border-cyan-400 focus-within:ring-2 focus-within:ring-cyan-500/20"
                     >
                       <GripVertical size={14} className="text-cyan-400" />
-                      <span className="min-w-0 flex-1 truncate">{column}</span>
+                      <span className="min-w-0 truncate py-1 pr-1">{col.qualified}</span>
+                      
+                      {/* INPUT ALIAS */}
+                      <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 transition focus-within:bg-white focus-within:ring-2 focus-within:ring-cyan-500/20">
+                        <span className="text-[10px] font-bold text-slate-400">AS</span>
+                        <input
+                          value={col.alias}
+                          onChange={(event) => updateColumnAlias(col.qualified, event.target.value)}
+                          placeholder="alias_baru"
+                          className="w-20 bg-transparent text-[12px] font-mono font-bold text-cyan-700 outline-none placeholder:font-normal placeholder:text-slate-300"
+                        />
+                      </div>
+
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          toggleColumn(column);
+                          toggleColumn(col.qualified);
                         }}
-                        aria-label={`Hapus ${column}`}
-                        className="rounded-md p-0.5 text-slate-400 opacity-50 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+                        aria-label={`Hapus ${col.qualified}`}
+                        className="rounded-md p-1.5 text-slate-400 opacity-50 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
                       >
                         <X size={14} />
                       </button>
@@ -834,7 +865,6 @@ export default function SQLQueryBuilder() {
             )}
           </div>
 
-          {/* Sisa UI seperti Group Condition, CASE, dsb (tidak ada perubahan selain class kosmetik standar Tailwind untuk menyelaraskan rounded-xl) */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/50">
             <div className="mb-5 flex items-center justify-between">
               <div>
@@ -895,6 +925,7 @@ export default function SQLQueryBuilder() {
             </div>
           </div>
 
+          {/* MENU LOGIKA LANJUTAN CASE */}
           <div className="rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50/80 to-white p-6 shadow-sm shadow-amber-100/50">
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 gap-4">
@@ -921,8 +952,139 @@ export default function SQLQueryBuilder() {
               </div>
             )}
           </div>
+
+          {/* MENU EKSPRESI HASIL */}
+          <div className="rounded-2xl border border-cyan-200 bg-cyan-50/50 p-6 shadow-sm">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-cyan-700">03b / Ekspresi hasil</p>
+                <h2 className="mt-1 text-lg font-extrabold text-slate-900">Gabungkan dan rapikan nilai</h2>
+                <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-slate-600">Fungsi seperti COALESCE atau LOWER mengolah nilai sebelum ditampilkan. Nama hasil membantu membaca kolom baru.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpressions((current) => [...current, makeExpression(sourceColumns[0]?.qualified || table.columns[0]?.name)])}
+                className="flex items-center gap-1.5 rounded-xl bg-cyan-600 px-4 py-2.5 text-[13px] font-bold text-white hover:bg-cyan-700 shadow-sm"
+              >
+                <Plus size={15} /> Tambah ekspresi
+              </button>
+            </div>
+            {expressions.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-cyan-300 bg-white p-4 text-[13px] text-slate-500">Contoh: `COALESCE(bt.nama, rs.nama)` memakai nilai pertama yang tidak kosong.</p>
+            ) : (
+              <div className="space-y-3">
+                {expressions.map((expression) => (
+                  <div key={expression.id} className="grid min-w-0 gap-3 rounded-xl border border-cyan-200/70 bg-white p-4 shadow-sm sm:grid-cols-[135px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_28px] sm:items-center">
+                    <SearchableSelect value={expression.function} onChange={(value) => updateExpression(expression.id, 'function', value)} options={expressionFunctions} placeholder="Fungsi" className="text-[13px] font-semibold" />
+                    <SearchableSelect
+                      value={expression.column}
+                      onChange={(value) => updateExpression(expression.id, 'column', value)}
+                      options={sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))}
+                      placeholder="Kolom"
+                    />
+                    <SearchableSelect
+                      value={expression.secondColumn}
+                      onChange={(value) => updateExpression(expression.id, 'secondColumn', value)}
+                      disabled={['LOWER', 'UPPER', 'DATE_TRUNC'].includes(expression.function)}
+                      options={[{ value: '', label: 'Fallback / Kolom 2' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                      placeholder="Nilai fallback / kolom kedua"
+                    />
+                    <input
+                      value={expression.alias}
+                      onChange={(event) => updateExpression(expression.id, 'alias', event.target.value.replace(/[^a-zA-Z0-9_]/g, '_'))}
+                      placeholder="Nama hasil (Alias)"
+                      className="min-w-0 rounded-xl border border-slate-200/80 px-4 py-2.5 text-[13px] outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setExpressions((current) => current.filter((item) => item.id !== expression.id))}
+                      className="flex items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 p-1"
+                      aria-label="Hapus ekspresi"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                    {expression.function === 'COALESCE' && !expression.secondColumn && (
+                      <input
+                        value={expression.value}
+                        onChange={(event) => updateExpression(expression.id, 'value', event.target.value)}
+                        placeholder="atau isi string fallback text manual"
+                        className="sm:col-span-2 rounded-xl border border-slate-200/80 px-4 py-2.5 text-[13px] outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* MENU QUERY LANJUTAN */}
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/50">
+            <div className="mb-5 flex items-center gap-4">
+              <div className="rounded-xl bg-slate-100 p-2.5 text-slate-600">
+                <SlidersHorizontal size={20} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">04 / Query lanjutan</p>
+                <h2 className="mt-1 text-lg font-extrabold text-slate-900">Kontrol hasil dan ringkasan</h2>
+                <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-slate-500">Atur data unik, ringkasan, pengurutan, dan jumlah halaman hasil tanpa menulis klausa SQL.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex items-center gap-2.5 rounded-xl border border-slate-200/80 p-4 text-[13px] font-bold text-slate-700 transition hover:bg-slate-50">
+                <input type="checkbox" checked={distinct} onChange={(event) => setDistinct(event.target.checked)} className="h-4 w-4 rounded accent-cyan-600 focus:ring-cyan-500" /> Hanya data unik (DISTINCT)
+              </label>
+              <label className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-200/80 p-3 px-4 text-[13px] font-bold text-slate-600 transition hover:bg-slate-50">
+                Agregasi
+                <SearchableSelect
+                  value={aggregate.function}
+                  onChange={(value) => setAggregate((current) => ({ ...current, function: value }))}
+                  options={[{ value: '', label: 'Tidak ada' }, ...aggregateFunctions.map((fn) => ({ value: fn, label: fn }))]}
+                  placeholder="Fungsi"
+                  className="w-auto"
+                />
+                <SearchableSelect
+                  value={aggregate.column}
+                  onChange={(value) => setAggregate((current) => ({ ...current, column: value }))}
+                  options={[{ value: '', label: 'Tidak ada' }, { value: '*', label: 'Semua baris (*)' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                  placeholder="Kolom"
+                  className="ml-auto max-w-40"
+                  disabled={!aggregate.function}
+                />
+              </label>
+              <label className="flex min-w-0 flex-wrap items-center gap-2.5 text-[13px] font-bold text-slate-600">
+                Kelompokkan
+                <SearchableSelect
+                  value={groupBy}
+                  onChange={setGroupBy}
+                  options={[{ value: '', label: 'Tidak ada' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                  placeholder="Pilih kolom grup"
+                  className="ml-auto flex-1"
+                />
+              </label>
+              <label className="flex min-w-0 flex-wrap items-center gap-2.5 text-[13px] font-bold text-slate-600">
+                Urutkan
+                <SearchableSelect
+                  value={orderBy}
+                  onChange={setOrderBy}
+                  options={[{ value: '', label: 'Tidak ada' }, ...sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))]}
+                  placeholder="Pilih kolom"
+                  className="ml-auto flex-1"
+                />
+                <SearchableSelect value={orderDirection} onChange={setOrderDirection} options={['ASC', 'DESC']} placeholder="Arah" className="w-auto" />
+              </label>
+              <label className="flex items-center gap-2 text-[13px] font-bold text-slate-600">
+                Batas baris
+                <input type="number" min="1" value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="Semua baris" className="ml-auto w-32 rounded-xl border border-slate-200/80 px-4 py-2.5 font-normal outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10" />
+              </label>
+              <label className="flex items-center gap-2 text-[13px] font-bold text-slate-600">
+                Mulai dari baris
+                <input type="number" min="0" value={offset} onChange={(event) => setOffset(event.target.value)} placeholder="0" className="ml-auto w-32 rounded-xl border border-slate-200/80 px-4 py-2.5 font-normal outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10" />
+              </label>
+            </div>
+          </div>
         </section>
 
+        {/* SIDEBAR KANAN PREVIEW */}
         <aside className="flex min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-slate-900/40">
           <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-5 shrink-0">
             <div>
@@ -945,7 +1107,7 @@ export default function SQLQueryBuilder() {
         </aside>
       </div>
       
-      {/* MODAL JSON (Tidak dirubah logikanya, hanya merapikan style Tailwind agar inline dengan yang baru) */}
+      {/* MODAL JSON */}
       {isSchemaModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm transition-opacity">
           <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-slate-900/5">
