@@ -10,6 +10,7 @@ const starterSchema = {
       name: 'penduduk',
       columns: [
         { name: 'id_penduduk', type: 'INTEGER', nullable: false },
+        { name: 'id_wilayah', type: 'INTEGER', nullable: false },
         { name: 'nama_lengkap', type: 'VARCHAR(120)', nullable: false },
         { name: 'jenis_kelamin', type: 'VARCHAR(1)', nullable: true },
         { name: 'umur', type: 'INTEGER', nullable: true },
@@ -85,7 +86,6 @@ async function normalizeSchema(item) {
     payload = await response.json();
   }
   
-  // Ambil nama dari payload, lalu item, atau beri nilai default
   const schemaName = item?.nama_skema || item?.name || payload?.name || item?.filename || 'Skema tanpa nama';
   
   return payload?.tables?.length
@@ -274,7 +274,7 @@ export default function SQLQueryBuilder() {
     setEditingSchemaId(item?.id || null);
     setSchemaFile(null);
     setSchemaForm({ 
-      name: item?.name || item?.nama_skema || '', // Mengambil name atau nama_skema
+      name: item?.name || item?.nama_skema || '',
       surveyId: item?.id_survei || item?.survei_id || selectedSurveyId || '', 
       json: JSON.stringify(item ? getSchemaPayload(item) : schema, null, 2) 
     });
@@ -294,8 +294,10 @@ export default function SQLQueryBuilder() {
     setSchemaSaving(true);
     try {
       const formData = new FormData();
-      const finalName = schemaForm.name.trim() || 'Skema tanpa nama'; // Gunakan default name yg sama dengan normalizer
-      formData.append('nama_skema', finalName);
+      const finalName = schemaForm.name.trim() || 'Skema tanpa nama';
+      
+      formData.append('name', finalName); // Memastikan nama terkirim dengan parameter 'name' 
+      formData.append('nama_skema', finalName); 
       formData.append('id_survei', schemaForm.surveyId);
       formData.append('skema_json', JSON.stringify(parsed));
       if (schemaFile) formData.append('file', schemaFile);
@@ -332,10 +334,7 @@ export default function SQLQueryBuilder() {
     return Object.fromEntries([...new Set(orderedNames)].map((name, index) => [name, getTableAlias(index)]));
   }, [joinedTableNames, schema.tables, selectedTable]);
   
-  // Semua tabel yg belum tergabung di join (bebas dari base table / root)
   const availableJoinTables = schema.tables.filter((item) => item.name !== selectedTable && !joinedTableNames.includes(item.name));
-  
-  // Mengumpulkan source table untuk autocomplete 
   const sourceTables = [selectedTable, ...joinedTableNames].map((name) => schema.tables.find((item) => item.name === name)).filter(Boolean);
   const sourceColumns = sourceTables.flatMap((source) => source.columns.map((column) => ({ ...column, table: source.name, alias: tableAliases[source.name], qualified: `${tableAliases[source.name]}.${column.name}` })));
 
@@ -399,10 +398,30 @@ export default function SQLQueryBuilder() {
     setGroups((current) => current.map((group) => (group.id === groupId ? { ...group, conditions: group.conditions.map((condition) => (condition.id === conditionId ? { ...condition, [key]: value } : condition)) } : group)));
   }
 
+  // ALGORITMA: Auto-Deteksi Kolom Relasi untuk JOIN
+  function findMatchingColumns(targetTableName) {
+    const targetTable = schema.tables.find(t => t.name === targetTableName);
+    if (!targetTable) return null;
+    for (const tCol of targetTable.columns) {
+      for (const sTable of sourceTables) {
+        const match = sTable.columns.find(sc => sc.name === tCol.name);
+        if (match) return { leftTable: sTable.name, leftCol: match.name, rightCol: tCol.name };
+      }
+    }
+    return null;
+  }
+
   function addJoin() {
     const joinTable = availableJoinTables[0];
     if (!joinTable) return;
-    setJoins((current) => [...current, { id: crypto.randomUUID(), type: 'LEFT JOIN', leftTable: selectedTable, table: joinTable.name, left: table.columns[0].name, right: joinTable.columns[0].name }]);
+    
+    // Auto-deteksi kolom jika nama kolom antara tabel lama dan baru ada yang sama persis
+    const match = findMatchingColumns(joinTable.name);
+    const leftTable = match ? match.leftTable : selectedTable;
+    const leftCol = match ? match.leftCol : table.columns[0].name;
+    const rightCol = match ? match.rightCol : joinTable.columns[0].name;
+
+    setJoins((current) => [...current, { id: crypto.randomUUID(), type: 'LEFT JOIN', leftTable, table: joinTable.name, left: leftCol, right: rightCol }]);
   }
 
   function updateJoin(joinId, key, value) {
@@ -422,12 +441,11 @@ export default function SQLQueryBuilder() {
     );
   }
 
-  // Set tabel utama baru dengan manual (tombol Set Utama)
   function setBaseTable(tableName) {
     if (tableName === selectedTable) return;
     setSelectedTable(tableName);
-    setSelectedColumns([]); // Kosongkan yang dipilih sebelumnya
-    setJoins([]); // Reset Joins karena base table terganti
+    setSelectedColumns([]); 
+    setJoins([]); 
     setExpandedTables((current) => ({ ...current, [tableName]: true }));
   }
 
@@ -532,7 +550,9 @@ export default function SQLQueryBuilder() {
       </section>
 
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(420px,1fr)_390px]">
-        <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col max-h-[85vh]">
+        
+        {/* PANEL KIRI (SKEMA) DENGAN PEMBATASAN OVERFLOW */}
+        <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
           <div className="border-b border-slate-100 p-4 shrink-0">
             <div className="flex items-center gap-2 font-semibold text-slate-900">
               <Table2 size={18} className="text-cyan-600" /> Skema database
@@ -552,22 +572,24 @@ export default function SQLQueryBuilder() {
               />
             </div>
           </div>
-          <div className="flex-1 overflow-auto p-3 relative bg-slate-50/30">
+          
+          {/* WADAH SCROLL UTAMA YANG MENGIZINKAN STICKY */}
+          <div className="max-h-[60vh] overflow-y-auto p-3 bg-slate-50/30 relative">
             {schema.tables.map((item) => {
               const isBaseTable = selectedTable === item.name;
               
               return (
-                <div key={item.name} className="mb-4 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-                  {/* Sticky header untuk nama tabel */}
-                  <div className={`sticky top-0 z-10 flex w-full items-center justify-between border-b px-2 py-2 text-left text-sm font-bold bg-white
-                    ${isBaseTable ? 'border-cyan-200 bg-cyan-50/50' : 'border-slate-100'}`}
+                <div key={item.name} className="mb-4 rounded-xl border border-slate-200 bg-white shadow-sm relative">
+                  {/* HEADER STICKY */}
+                  <div className={`sticky top-0 z-20 flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm font-bold bg-white/95 backdrop-blur shadow-[0_2px_4px_rgba(0,0,0,0.02)]
+                    ${isBaseTable ? 'border-cyan-200 text-cyan-800' : 'border-slate-100 text-slate-700'}`}
                   >
                     <button
                       type="button"
                       onClick={() => {
                         setExpandedTables((current) => ({ ...current, [item.name]: !current[item.name] }));
                       }}
-                      className={`flex flex-1 items-center gap-2 outline-none ${isBaseTable ? 'text-cyan-800' : 'text-slate-700'}`}
+                      className="flex flex-1 items-center gap-2 outline-none"
                     >
                       <ChevronDown size={14} className={`transition-transform text-slate-400 ${expandedTables[item.name] ? '' : '-rotate-90'}`} />
                       {item.name}
@@ -615,7 +637,7 @@ export default function SQLQueryBuilder() {
           </div>
           <div className="border-t border-slate-100 p-4 text-xs leading-relaxed text-slate-500 shrink-0">
             <FileJson size={15} className="mb-1 text-cyan-600" />
-            Klik Set Utama untuk mengganti tabel dasar (FROM). Buka-tutup akordeon tidak me-reset tabel.
+            Klik Set Utama untuk mengganti tabel dasar (FROM).
           </div>
         </aside>
 
@@ -710,7 +732,20 @@ export default function SQLQueryBuilder() {
                         onChange={(value) => {
                           const nextTable = schema.tables.find((item) => item.name === value);
                           if (!nextTable) return;
-                          setJoins((current) => current.map((item) => (item.id === join.id ? { ...item, table: nextTable.name, right: nextTable.columns[0].name } : item)));
+                          
+                          // Deteksi auto-join saat tabel tujuan diubah manual
+                          const match = findMatchingColumns(nextTable.name);
+                          
+                          setJoins((current) => current.map((item) => {
+                            if (item.id !== join.id) return item;
+                            return { 
+                              ...item, 
+                              table: nextTable.name, 
+                              leftTable: match ? match.leftTable : item.leftTable,
+                              left: match ? match.leftCol : item.left,
+                              right: match ? match.rightCol : nextTable.columns[0].name 
+                            };
+                          }));
                         }}
                         options={[
                           { value: '', label: 'Tabel tujuan' },
