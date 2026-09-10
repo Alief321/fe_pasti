@@ -53,6 +53,18 @@ function makeExpression(column = 'umur') {
   return { id: crypto.randomUUID(), function: 'COALESCE', column, secondColumn: '', value: '', alias: 'nilai_bersih' };
 }
 
+function makeCase(column = '') {
+  return { 
+    id: crypto.randomUUID(), 
+    column, 
+    operator: '>=', 
+    value: '18', 
+    trueLabel: 'Dewasa', 
+    falseLabel: 'Belum dewasa', 
+    alias: 'kelompok_umur' 
+  };
+}
+
 function getStoredSchema() {
   try {
     const stored = JSON.parse(localStorage.getItem('sqlab-schema') || 'null');
@@ -200,7 +212,7 @@ export default function SQLQueryBuilder() {
   
   const [selectedTable, setSelectedTable] = useState(() => getStoredSchema().tables[0].name);
   
-  // STRUKTUR BARU UNTUK ALIAS: array of objects { qualified, alias }
+  // STRUKTUR ALIAS
   const [selectedColumns, setSelectedColumns] = useState(() => 
     getStoredSchema().tables[0].columns.slice(0, 2).map((column) => ({
       qualified: `bt.${column.name}`,
@@ -219,8 +231,7 @@ export default function SQLQueryBuilder() {
   const [search, setSearch] = useState('');
   const [expandedTables, setExpandedTables] = useState(() => ({ [getStoredSchema().tables[0].name]: true }));
   const [groups, setGroups] = useState([makeGroup()]);
-  const [caseEnabled, setCaseEnabled] = useState(true);
-  const [caseColumn, setCaseColumn] = useState('umur');
+  const [cases, setCases] = useState([]); // State CASE dinamis yang baru
   const [expressions, setExpressions] = useState([]);
   const [copied, setCopied] = useState(false);
   const fileInput = useRef(null);
@@ -270,7 +281,7 @@ export default function SQLQueryBuilder() {
     })));
     setJoins([]);
     setGroups([makeGroup(firstColumn)]);
-    setCaseColumn(firstColumn);
+    setCases([]); // Reset cases form
     setAggregate({ function: '', column: '' });
     setExpressions([]);
   }
@@ -350,7 +361,7 @@ export default function SQLQueryBuilder() {
   const sourceColumns = sourceTables.flatMap((source) => source.columns.map((column) => ({ ...column, table: source.name, alias: tableAliases[source.name], qualified: `${tableAliases[source.name]}.${column.name}` })));
 
   const sql = useMemo(() => {
-    // GENERASI SQL: Terapkan Alias 'AS' jika diisi
+    // 01. SELECT
     const selectFields = selectedColumns.length 
       ? selectedColumns.map((col) => col.alias ? `  ${col.qualified} AS ${col.alias}` : `  ${col.qualified}`) 
       : ['  *'];
@@ -360,7 +371,18 @@ export default function SQLQueryBuilder() {
         `  ${aggregate.function}(${aggregate.column === '*' ? '*' : getQualifiedColumn(aggregate.column, tableAliases[selectedTable])}) AS ${aggregate.function.toLowerCase()}_${aggregate.column === '*' ? 'rows' : aggregate.column.split('.').pop()}`,
       );
     const selectList = `${distinct ? 'DISTINCT\n' : ''}${selectFields.join(',\n')}`;
-    const caseSql = caseEnabled ? `,\n  CASE\n    WHEN ${getQualifiedColumn(caseColumn, tableAliases[selectedTable])} >= 18 THEN 'Dewasa'\n    ELSE 'Belum dewasa'\n  END AS kelompok_umur` : '';
+    
+    // 03. CASE Dinamis
+    const caseSql = cases.map((c) => {
+      if (!c.column) return '';
+      const qualifiedCol = getQualifiedColumn(c.column, tableAliases[selectedTable]);
+      const condition = c.operator === 'IS NULL' 
+        ? `${qualifiedCol} IS NULL` 
+        : `${qualifiedCol} ${c.operator} '${c.value.replaceAll("'", "''")}'`;
+      return `,\n  CASE\n    WHEN ${condition} THEN '${c.trueLabel.replaceAll("'", "''")}'\n    ELSE '${c.falseLabel.replaceAll("'", "''")}'\n  END AS ${c.alias || 'kategori'}`;
+    }).join('');
+
+    // 03b. Expressions
     const expressionSql = expressions
       .map((expression) => {
         const first = getQualifiedColumn(expression.column, tableAliases[selectedTable]);
@@ -369,6 +391,8 @@ export default function SQLQueryBuilder() {
         return `,\n  ${expression.function}(${args}) AS ${expression.alias || 'hasil'}`;
       })
       .join('');
+
+    // 02. WHERE Groups
     const activeGroups = groups.map((group) => ({ ...group, conditions: group.conditions.filter((condition) => condition.enabled) })).filter((group) => group.conditions.length);
     const whereSql = activeGroups
       .map(
@@ -376,14 +400,20 @@ export default function SQLQueryBuilder() {
           `(${group.conditions.map((condition) => `${getQualifiedColumn(condition.column, tableAliases[selectedTable])} ${condition.operator}${condition.operator === 'IS NULL' ? '' : ` '${condition.value.replaceAll("'", "''")}'`}`).join(` ${group.logic} `)})`,
       )
       .join('\n  AND ');
+
+    // 01b. JOIN
     const joinSql = joins.map((join) => `\n${join.type} ${join.table} ${tableAliases[join.table]} ON ${tableAliases[join.leftTable]}.${join.left} = ${tableAliases[join.table]}.${join.right}`).join('');
+    
+    // 04. GROUP, ORDER, LIMIT
     const groupSql = groupBy ? `\nGROUP BY ${getQualifiedColumn(groupBy, tableAliases[selectedTable])}` : '';
     const orderSql = orderBy ? `\nORDER BY ${getQualifiedColumn(orderBy, tableAliases[selectedTable])} ${orderDirection}` : '';
     const limitSql = limit ? `\nLIMIT ${limit}` : '';
     const offsetSql = offset ? `\nOFFSET ${offset}` : '';
-    return `SELECT\n${selectList}${caseSql}${expressionSql}\nFROM ${selectedTable} ${tableAliases[selectedTable]}${joinSql}${whereSql ? `\nWHERE ${whereSql}` : ''}${groupSql}${orderSql}${limitSql}${offsetSql};`;
-  }, [aggregate, caseColumn, caseEnabled, distinct, expressions, groupBy, groups, joins, limit, offset, orderBy, orderDirection, selectedColumns, selectedTable, tableAliases]);
 
+    return `SELECT\n${selectList}${caseSql}${expressionSql}\nFROM ${selectedTable} ${tableAliases[selectedTable]}${joinSql}${whereSql ? `\nWHERE ${whereSql}` : ''}${groupSql}${orderSql}${limitSql}${offsetSql};`;
+  }, [aggregate, cases, distinct, expressions, groupBy, groups, joins, limit, offset, orderBy, orderDirection, selectedColumns, selectedTable, tableAliases]);
+
+  // Fungsi utilitas deteksi Join
   function findMatchingColumns(targetTableName) {
     const targetTable = schema.tables.find(t => t.name === targetTableName);
     if (!targetTable) return null;
@@ -396,11 +426,12 @@ export default function SQLQueryBuilder() {
     return null;
   }
 
+  // ALGORITMA: Pengecekan otomatis JOIN jika kolom dari tabel lain ditarik/diklik
   function handleColumnAdd(qualifiedColumn) {
     const [alias] = qualifiedColumn.split('.');
+    
     const sourceTableName = Object.keys(tableAliases).find(key => tableAliases[key] === alias);
 
-    // Auto Join Logic
     if (sourceTableName && sourceTableName !== selectedTable && !joins.some(j => j.table === sourceTableName)) {
        const match = findMatchingColumns(sourceTableName);
        const joinTableObj = schema.tables.find(t => t.name === sourceTableName);
@@ -419,7 +450,6 @@ export default function SQLQueryBuilder() {
        }]);
     }
 
-    // Insert column as object
     setSelectedColumns(current => {
        if (current.some(c => c.qualified === qualifiedColumn)) return current;
        return [...current, { qualified: qualifiedColumn, alias: '' }];
@@ -925,7 +955,7 @@ export default function SQLQueryBuilder() {
             </div>
           </div>
 
-          {/* MENU LOGIKA LANJUTAN CASE */}
+          {/* 03 / MENU LOGIKA LANJUTAN CASE (DINAMIS) */}
           <div className="rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50/80 to-white p-6 shadow-sm shadow-amber-100/50">
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 gap-4">
@@ -935,25 +965,98 @@ export default function SQLQueryBuilder() {
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600">03 / Logika lanjutan</p>
                   <h2 className="mt-1 text-lg font-extrabold text-slate-900">Buat kategori dengan CASE</h2>
-                  <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">CASE membuat label yang mudah dibaca dari aturan sederhana, misalnya batas umur.</p>
+                  <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">Buat aturan pelabelan data secara dinamis berdasarkan kondisi tertentu (misal: pengelompokan umur).</p>
                 </div>
               </div>
-              <button type="button" onClick={() => setCaseEnabled((current) => !current)} className={`relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors ${caseEnabled ? 'bg-amber-500' : 'bg-slate-300'}`} aria-label="Aktifkan CASE">
-                <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${caseEnabled ? 'left-6' : 'left-1'}`} />
+              <button
+                type="button"
+                onClick={() => setCases((current) => [...current, makeCase(sourceColumns[0]?.qualified || table.columns[0]?.name)])}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2.5 text-[13px] font-bold text-white shadow-sm transition hover:bg-amber-600 hover:shadow-amber-500/30"
+              >
+                <Plus size={15} /> Tambah CASE
               </button>
             </div>
-            {caseEnabled && (
-              <div className="mt-5 flex flex-wrap items-center gap-2.5 rounded-xl border border-amber-200 bg-white p-3.5 text-[13px]">
-                <span className="font-bold text-slate-500">Jika</span>
-                <SearchableSelect value={caseColumn} onChange={setCaseColumn} options={sourceColumns.map((column) => ({ value: column.qualified, label: column.qualified }))} placeholder="Pilih kolom" className="w-auto min-w-40" />
-                <span className="text-slate-600">
-                  ≥ 18 maka <b className="text-slate-800">Dewasa</b>, selain itu <b className="text-slate-800">Belum dewasa</b>
-                </span>
+            
+            {cases.length === 0 ? (
+              <div className="mt-5 rounded-xl border border-dashed border-amber-300 bg-white/60 p-4 text-[13px] text-amber-700/70">
+                Belum ada logika CASE. Tambahkan untuk membuat aturan kondisi bertingkat.
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4">
+                {cases.map((c) => (
+                  <div key={c.id} className="relative flex flex-col gap-3 rounded-xl border border-amber-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center pr-10">
+                    <div className="flex flex-1 flex-col gap-3">
+                      
+                      {/* Baris 1: JIKA (Kondisi) */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="w-14 text-[12px] font-bold text-amber-700 sm:w-auto">JIKA</span>
+                        <SearchableSelect 
+                          value={c.column} 
+                          onChange={(val) => setCases(curr => curr.map(item => item.id === c.id ? { ...item, column: val } : item))}
+                          options={sourceColumns.map((col) => ({ value: col.qualified, label: col.qualified }))} 
+                          placeholder="Pilih kolom" 
+                          className="w-full sm:w-auto sm:min-w-[140px]" 
+                        />
+                        <SearchableSelect 
+                          value={c.operator} 
+                          onChange={(val) => setCases(curr => curr.map(item => item.id === c.id ? { ...item, operator: val } : item))}
+                          options={operators} 
+                          className="w-full sm:w-auto sm:min-w-[80px]" 
+                        />
+                        <input
+                          disabled={c.operator === 'IS NULL'}
+                          value={c.value}
+                          onChange={(e) => setCases(curr => curr.map(item => item.id === c.id ? { ...item, value: e.target.value } : item))}
+                          placeholder="Nilai target"
+                          className="w-full sm:w-auto sm:min-w-[100px] rounded-xl border border-slate-200/80 bg-slate-50 px-3 py-2 text-[13px] outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-500/20 disabled:opacity-50"
+                        />
+                      </div>
+                      
+                      {/* Baris 2: MAKA & SELAIN ITU (Label) */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="w-14 text-[12px] font-bold text-amber-700 sm:w-auto">MAKA</span>
+                        <input
+                          value={c.trueLabel}
+                          onChange={(e) => setCases(curr => curr.map(item => item.id === c.id ? { ...item, trueLabel: e.target.value } : item))}
+                          placeholder="Label jika benar"
+                          className="w-full sm:w-auto sm:min-w-[120px] rounded-xl border border-slate-200/80 bg-slate-50 px-3 py-2 text-[13px] outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-500/20"
+                        />
+                        <span className="text-[12px] font-bold text-slate-500 sm:ml-2">SELAIN ITU</span>
+                        <input
+                          value={c.falseLabel}
+                          onChange={(e) => setCases(curr => curr.map(item => item.id === c.id ? { ...item, falseLabel: e.target.value } : item))}
+                          placeholder="Label jika salah"
+                          className="w-full sm:w-auto sm:min-w-[120px] rounded-xl border border-slate-200/80 bg-slate-50 px-3 py-2 text-[13px] outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-500/20"
+                        />
+                      </div>
+                      
+                      {/* Baris 3: AS (Alias) */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[12px] font-bold text-slate-500">NAMAKAN KOLOM INI SEBAGAI :</span>
+                        <input
+                          value={c.alias}
+                          onChange={(e) => setCases(curr => curr.map(item => item.id === c.id ? { ...item, alias: e.target.value.replace(/[^a-zA-Z0-9_]/g, '_') } : item))}
+                          placeholder="nama_kolom_baru"
+                          className="w-full sm:w-auto sm:min-w-[140px] rounded-xl border border-slate-200/80 bg-slate-50 px-3 py-2 font-mono text-[13px] font-bold text-cyan-700 outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-500/20"
+                        />
+                      </div>
+                    </div>
+                    
+                    <button 
+                      type="button" 
+                      onClick={() => setCases(curr => curr.filter(item => item.id !== c.id))} 
+                      className="absolute right-3 top-3 rounded-lg bg-white p-1.5 text-slate-400 shadow-sm transition hover:bg-rose-50 hover:text-rose-500 sm:top-1/2 sm:-translate-y-1/2" 
+                      aria-label="Hapus CASE"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          {/* MENU EKSPRESI HASIL */}
+          {/* 03b / MENU EKSPRESI HASIL */}
           <div className="rounded-2xl border border-cyan-200 bg-cyan-50/50 p-6 shadow-sm">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
@@ -993,7 +1096,7 @@ export default function SQLQueryBuilder() {
                       value={expression.alias}
                       onChange={(event) => updateExpression(expression.id, 'alias', event.target.value.replace(/[^a-zA-Z0-9_]/g, '_'))}
                       placeholder="Nama hasil (Alias)"
-                      className="min-w-0 rounded-xl border border-slate-200/80 px-4 py-2.5 text-[13px] outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10"
+                      className="min-w-0 rounded-xl border border-slate-200/80 bg-slate-50 px-4 py-2.5 text-[13px] outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-500/10"
                     />
                     <button
                       type="button"
@@ -1008,7 +1111,7 @@ export default function SQLQueryBuilder() {
                         value={expression.value}
                         onChange={(event) => updateExpression(expression.id, 'value', event.target.value)}
                         placeholder="atau isi string fallback text manual"
-                        className="sm:col-span-2 rounded-xl border border-slate-200/80 px-4 py-2.5 text-[13px] outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10"
+                        className="sm:col-span-2 rounded-xl border border-slate-200/80 bg-slate-50 px-4 py-2.5 text-[13px] outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-500/10"
                       />
                     )}
                   </div>
@@ -1017,7 +1120,7 @@ export default function SQLQueryBuilder() {
             )}
           </div>
 
-          {/* MENU QUERY LANJUTAN */}
+          {/* 04 / MENU QUERY LANJUTAN */}
           <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm shadow-slate-200/50">
             <div className="mb-5 flex items-center gap-4">
               <div className="rounded-xl bg-slate-100 p-2.5 text-slate-600">
@@ -1074,11 +1177,11 @@ export default function SQLQueryBuilder() {
               </label>
               <label className="flex items-center gap-2 text-[13px] font-bold text-slate-600">
                 Batas baris
-                <input type="number" min="1" value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="Semua baris" className="ml-auto w-32 rounded-xl border border-slate-200/80 px-4 py-2.5 font-normal outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10" />
+                <input type="number" min="1" value={limit} onChange={(event) => setLimit(event.target.value)} placeholder="Semua baris" className="ml-auto w-32 rounded-xl border border-slate-200/80 bg-slate-50 px-4 py-2.5 font-normal outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-500/10" />
               </label>
               <label className="flex items-center gap-2 text-[13px] font-bold text-slate-600">
                 Mulai dari baris
-                <input type="number" min="0" value={offset} onChange={(event) => setOffset(event.target.value)} placeholder="0" className="ml-auto w-32 rounded-xl border border-slate-200/80 px-4 py-2.5 font-normal outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/10" />
+                <input type="number" min="0" value={offset} onChange={(event) => setOffset(event.target.value)} placeholder="0" className="ml-auto w-32 rounded-xl border border-slate-200/80 bg-slate-50 px-4 py-2.5 font-normal outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-500/10" />
               </label>
             </div>
           </div>
