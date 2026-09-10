@@ -223,8 +223,6 @@ export default function PenyelesaianDetail() {
   const [error, setError] = useState('');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  
-  // FIX: Menggunakan Object sebagai dictionary agar React mendeteksi perubahan dengan sempurna
   const [expandedRows, setExpandedRows] = useState({});
   
   const tableViewportRef = useRef(null);
@@ -687,23 +685,25 @@ export default function PenyelesaianDetail() {
     await handleStatusChange(row, noteDraft.trim());
   };
 
-  if (loading) return <div className="rounded-3xl bg-white p-8 text-slate-500 shadow-sm">Memuat gabungan LK...</div>;
-  if (error) return <div className="rounded-3xl border border-red-200 bg-red-50 p-8 text-red-700">{error}</div>;
+  if (loading) return <div className="rounded-3xl bg-white p-6 md:p-8 text-slate-500 shadow-sm">Memuat gabungan LK...</div>;
+  if (error) return <div className="rounded-3xl border border-red-200 bg-red-50 p-6 md:p-8 text-red-700">{error}</div>;
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6">
-      <header className="flex flex-wrap items-center gap-4">
-        <button type="button" onClick={() => navigate('/penyelesaian')} className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 hover:bg-slate-50">
-          <ArrowLeft size={20} />
-        </button>
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{sourceGroup === 'ALL' ? `Gabungan ${new Set(sources.map((source) => source.spreadsheetId)).size} LK` : 'LK terpisah'}</p>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">Penyelesaian Anomali{surveyName ? ` · ${surveyName}` : ''}</h1>
-          <p className="text-sm text-slate-500">Periksa dan tandai data yang sudah diselesaikan.</p>
+    <div className="mx-auto max-w-[1600px] space-y-5 md:space-y-6">
+      <header className="flex flex-col md:flex-row md:items-center gap-4">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => navigate('/penyelesaian')} className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 hover:bg-slate-50 shrink-0">
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <p className="text-[11px] md:text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{sourceGroup === 'ALL' ? `Gabungan ${new Set(sources.map((source) => source.spreadsheetId)).size} LK` : 'LK terpisah'}</p>
+            <h1 className="text-xl md:text-2xl font-bold text-slate-900 leading-tight">Penyelesaian Anomali{surveyName ? ` · ${surveyName}` : ''}</h1>
+            <p className="hidden md:block text-sm text-slate-500 mt-1">Periksa dan tandai data yang sudah diselesaikan.</p>
+          </div>
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="flex items-center gap-3 md:ml-auto">
           {authenticated && (
-            <button type="button" onClick={handleShareLink} className="flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 transition-colors" title="Salin tautan untuk dibagikan">
+            <button type="button" onClick={handleShareLink} className="flex flex-1 md:flex-none items-center justify-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 transition-colors" title="Salin tautan untuk dibagikan">
               <Share2 size={18} />
               Bagikan
             </button>
@@ -712,15 +712,15 @@ export default function PenyelesaianDetail() {
         </div>
       </header>
 
-      <section className="grid gap-4 sm:grid-cols-3">
-        <Stat icon={<Table2 />} label="Total data" value={stats.total} color="blue" />
+      <section className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+        <Stat icon={<Table2 />} label="Total data" value={stats.total} color="blue" className="col-span-2 md:col-span-1" />
         <Stat icon={<CheckCircle2 />} label="Selesai" value={stats.completed} color="emerald" />
-        <Stat icon={<Layers3 />} label="Belum selesai" value={stats.pending} color="amber" />
+        <Stat icon={<Layers3 />} label="Belum" value={stats.pending} color="amber" />
       </section>
 
       {!publicDetail && (
-        <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <label className="min-w-56 flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-3 md:p-4 shadow-sm">
+          <label className="w-full md:min-w-56 md:flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
             Gabungkan berdasarkan kolom
             <select value={selectedKey} onChange={(event) => handleSelectedKeyChange(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
               <option value="">Pilih kolom...</option>
@@ -733,18 +733,18 @@ export default function PenyelesaianDetail() {
           </label>
 
           {showAdvancedSettings && (
-            <div className="min-w-64 flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <div className="w-full md:min-w-64 md:flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500 mt-2 md:mt-0">
               Pencocokan kolom per LK / sheet
               <div className="mt-2 max-h-32 space-y-2 overflow-auto rounded-xl border border-slate-300 p-2">
                 {activeSources.map((source) => (
-                  <div key={source.sourceKey} className="flex items-center gap-2">
+                  <div key={source.sourceKey} className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2">
                     <span className="min-w-0 flex-1 truncate text-xs font-normal text-slate-600" title={`${source.label} / ${source.sheetName}`}>
                       {source.label} / {source.sheetName}
                     </span>
                     <select
                       value={keyMappings[source.sourceKey] || ''}
                       onChange={(event) => setKeyMappings((current) => ({ ...current, [source.sourceKey]: event.target.value }))}
-                      className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-800"
+                      className="w-full md:max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-800"
                     >
                       <option value="">Tidak dicocokkan</option>
                       {source.headers.map((header) => (
@@ -756,6 +756,7 @@ export default function PenyelesaianDetail() {
                   </div>
                 ))}
               </div>
+              
               <div className="mt-3 max-h-72 space-y-2 overflow-auto rounded-xl border border-slate-300 p-2">
                 <p className="px-1 text-[11px] font-semibold normal-case text-slate-500">Nama kolom hasil</p>
                 {activeSources.map((source) => (
@@ -764,14 +765,14 @@ export default function PenyelesaianDetail() {
                       {source.label} / {source.sheetName}
                     </p>
                     {source.headers.map((header) => (
-                      <label key={`${source.sourceKey}-${header}`} className="flex items-center gap-2 normal-case">
+                      <label key={`${source.sourceKey}-${header}`} className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 normal-case mt-2 md:mt-0">
                         <span className="min-w-0 flex-1 truncate text-[11px] font-normal text-slate-600" title={header}>
                           {header}
                         </span>
                         <select
                           value={columnMappings[source.sourceKey]?.[header] || header}
                           onChange={(event) => setColumnMappings((current) => ({ ...current, [source.sourceKey]: { ...(current[source.sourceKey] || {}), [header]: event.target.value || header } }))}
-                          className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-normal text-slate-800"
+                          className="w-full md:max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-normal text-slate-800"
                         >
                           {headers.map((targetHeader) => (
                             <option key={`${source.sourceKey}-${header}-${targetHeader}`} value={targetHeader}>
@@ -785,11 +786,11 @@ export default function PenyelesaianDetail() {
                 ))}
               </div>
               {authenticated && (surveiId || spreadsheetId) && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={saveColumnMapping} disabled={mappingSaving} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={saveColumnMapping} disabled={mappingSaving} className="inline-flex w-full md:w-auto items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
                     <Save size={14} /> {mappingSaving ? 'Menyimpan...' : 'Simpan standar admin'}
                   </button>
-                  {mappingMessage && <span className="text-xs font-normal text-slate-500">{mappingMessage}</span>}
+                  {mappingMessage && <span className="text-xs font-normal text-slate-500 w-full md:w-auto text-center">{mappingMessage}</span>}
                 </div>
               )}
             </div>
@@ -797,8 +798,8 @@ export default function PenyelesaianDetail() {
         </section>
       )}
 
-      {/* FIX Z-INDEX: Menggunakan z-50 pada header filter kontrol agar di atas tabel */}
-      <section className="relative md:sticky md:top-3 z-50 flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
+      {/* FILTER SECTION DENGAN Z-INDEX MUTLAK */}
+      <section className="relative md:sticky md:top-3 z-[60] flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
         <div className="flex w-full items-center gap-2 md:w-auto md:flex-1">
           <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-3 text-slate-400" size={17} />
@@ -838,11 +839,12 @@ export default function PenyelesaianDetail() {
               <SlidersHorizontal size={16} /> Kolom{hiddenColumns.length ? ` (${hiddenColumns.length} tersembunyi)` : ''}
             </button>
             
+            {/* Z-INDEX TERTINGGI UNTUK DROPDOWN KOLOM */}
             {hiddenColumnsOpen && (
-              <div className="absolute left-0 top-full z-[100] mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl md:left-auto md:right-0 md:w-72">
+              <div className="absolute left-0 top-full z-[100] mt-2 w-[calc(100vw-2rem)] max-w-xs rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl md:left-auto md:right-0 md:w-72">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Tampilkan kolom</p>
-                  <button type="button" onClick={() => setHiddenColumns([])} className="text-xs font-semibold text-blue-600">
+                  <button type="button" onClick={() => setHiddenColumns([])} className="text-xs font-semibold text-blue-600 p-1">
                     Reset
                   </button>
                 </div>
@@ -880,11 +882,11 @@ export default function PenyelesaianDetail() {
       </section>
 
       {showAdvancedSettings && (detectedStatusColumns.length > 0 || detectedDateColumns.length > 0 || detectedNoteColumns.length > 0) && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 md:p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-slate-800">Deteksi kolom LK</p>
-              <p className="text-xs text-slate-500">Konfirmasi kolom status, tanggal penyelesaian, dan catatan tindak lanjut.</p>
+              <p className="hidden md:block text-xs text-slate-500">Konfirmasi kolom status, tanggal penyelesaian, dan catatan tindak lanjut.</p>
             </div>
             <button type="button" onClick={() => setShowFieldSettings((value) => !value)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
               {showFieldSettings ? 'Sembunyikan' : 'Tampilkan'}
@@ -892,10 +894,10 @@ export default function PenyelesaianDetail() {
           </div>
 
           {showFieldSettings && (
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Status penyelesaian
-                <select value={statusColumnChoice} onChange={(event) => setStatusColumnChoice(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
+                <select value={statusColumnChoice} onChange={(event) => setStatusColumnChoice(event.target.value)} className="mt-1 md:mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
                   <option value="">Otomatis / tidak diubah</option>
                   {detectedStatusColumns.map((header) => (
                     <option key={header} value={header}>
@@ -904,10 +906,9 @@ export default function PenyelesaianDetail() {
                   ))}
                 </select>
               </label>
-
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Tanggal penyelesaian
-                <select value={dateColumnChoice} onChange={(event) => setDateColumnChoice(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
+                <select value={dateColumnChoice} onChange={(event) => setDateColumnChoice(event.target.value)} className="mt-1 md:mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
                   <option value="">Otomatis / tidak diubah</option>
                   {detectedDateColumns.map((header) => (
                     <option key={header} value={header}>
@@ -916,10 +917,9 @@ export default function PenyelesaianDetail() {
                   ))}
                 </select>
               </label>
-
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Kolom catatan
-                <select value={noteColumnChoice} onChange={(event) => setNoteColumnChoice(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
+                <select value={noteColumnChoice} onChange={(event) => setNoteColumnChoice(event.target.value)} className="mt-1 md:mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-normal text-slate-800">
                   <option value="">Tidak ada kolom catatan</option>
                   {detectedNoteColumns.map((header) => (
                     <option key={header} value={header}>
@@ -934,29 +934,29 @@ export default function PenyelesaianDetail() {
       )}
 
       {!publicDetail && sheetOptions.length > 1 && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 md:p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-slate-800">Pilih sheet yang ditampilkan</p>
-              <p className="text-xs text-slate-500">Sheet yang tidak dipilih tidak ikut digabung.</p>
+              <p className="text-sm font-semibold text-slate-800">Pilih sheet</p>
+              <p className="text-xs text-slate-500 hidden md:block">Sheet yang tidak dipilih tidak ikut digabung.</p>
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setSelectedSheetKeys(sheetOptions.map((sheet) => sheet.key))} className="text-xs font-semibold text-blue-600 hover:underline">
-                Pilih semua
+              <button type="button" onClick={() => setSelectedSheetKeys(sheetOptions.map((sheet) => sheet.key))} className="text-xs font-semibold text-blue-600 hover:underline p-1">
+                Semua
               </button>
-              <button type="button" onClick={() => setSelectedSheetKeys([])} className="text-xs font-semibold text-slate-500 hover:underline">
-                Kosongkan
+              <button type="button" onClick={() => setSelectedSheetKeys([])} className="text-xs font-semibold text-slate-500 hover:underline p-1">
+                Kosong
               </button>
             </div>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-3 grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {sheetOptions.map((sheet) => (
               <label key={sheet.key} className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
                 <input
                   type="checkbox"
                   checked={selectedSheetKeys.includes(sheet.key)}
                   onChange={() => setSelectedSheetKeys((current) => (current.includes(sheet.key) ? current.filter((key) => key !== sheet.key) : [...current, sheet.key]))}
-                  className="h-4 w-4 accent-blue-600"
+                  className="h-4 w-4 accent-blue-600 shrink-0"
                 />
                 <span className="truncate" title={sheet.label}>
                   {sheet.label}
@@ -968,7 +968,7 @@ export default function PenyelesaianDetail() {
       )}
 
       {noteModalRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <h2 className="text-base font-bold text-slate-900">Catatan penyelesaian</h2>
             <p className="mt-1 text-sm text-slate-500">Isi catatan sebelum data ditandai selesai.</p>
@@ -998,21 +998,22 @@ export default function PenyelesaianDetail() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col relative z-10">
-        <div ref={tableViewportRef} className="overflow-auto" style={{ maxHeight: '72vh' }}>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col relative z-10 w-full">
+        {/* MOBILE OPTIMIZATION: overflow-x-auto ditambahkan pada wrapper ini */}
+        <div ref={tableViewportRef} className="overflow-x-auto overflow-y-auto w-full max-h-[65vh] md:max-h-[72vh] touch-pan-x touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table className="min-w-full table-fixed border-collapse text-left text-sm relative">
-            <thead className="sticky top-0 z-30 bg-slate-900 text-white shadow-sm">
+            <thead className="sticky top-0 z-[40] bg-slate-900 text-white shadow-sm">
               <tr>
-                <th className="sticky left-0 z-30 w-40 bg-slate-900 px-4 py-3 text-left align-top">Status</th>
+                <th className="sticky left-0 z-[40] w-[110px] md:w-40 bg-slate-900 px-3 md:px-4 py-3 text-left align-top">Status</th>
                 {visibleHeaders.map((header, headerIndex) => {
                   const isFrozen = headerIndex < freezeColumnsCount;
-                  const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
+                  const leftOffset = isFrozen ? (window.innerWidth < 768 ? 110 : 160) + headerIndex * 200 : 0;
                   return (
-                    <th key={header} className="min-w-52 px-4 py-3 align-top" style={{ maxWidth: '280px', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 10, backgroundColor: '#0f172a' } : {}) }}>
+                    <th key={header} className="min-w-44 md:min-w-52 px-3 md:px-4 py-3 align-top" style={{ maxWidth: '280px', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 10, backgroundColor: '#0f172a' } : {}) }}>
                       <div className="flex items-start justify-between gap-2">
-                        <button type="button" onClick={() => handleSort(header)} className="flex items-center gap-1 text-left font-semibold text-white hover:text-blue-200">
-                          <span>{header}</span>
-                          <ArrowUpDown size={14} />
+                        <button type="button" onClick={() => handleSort(header)} className="flex items-center gap-1 text-left text-xs md:text-sm font-semibold text-white hover:text-blue-200">
+                          <span className="truncate">{header}</span>
+                          <ArrowUpDown size={14} className="shrink-0" />
                         </button>
                         <ColumnFilterMenu
                           header={header}
@@ -1028,7 +1029,7 @@ export default function PenyelesaianDetail() {
                     </th>
                   );
                 })}
-                <th className="w-40 whitespace-nowrap px-4 py-3 align-top">Sumber LK</th>
+                <th className="w-32 md:w-40 px-3 md:px-4 py-3 align-top text-xs md:text-sm">Sumber LK</th>
               </tr>
             </thead>
 
@@ -1036,56 +1037,77 @@ export default function PenyelesaianDetail() {
             {paginatedRows.map((row) => {
               const completed = getRowCompletion(row);
               const rowKeyValue = row._stableId;
-              
-              // FIX: isExpanded mengambil status boolean yang kuat dari Object dictionary
               const isExpanded = !!expandedRows[rowKeyValue];
               
               return (
                 <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
                   
-                  <td className="sticky left-0 z-20 bg-inherit p-0 align-top font-semibold border-r border-slate-100 shadow-[1px_0_0_0_#f1f5f9]">
-                    <div className="sticky top-[46px] p-4 flex flex-col gap-2 w-40 max-h-max">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        {canUpdateStatus && <input type="checkbox" checked={completed} onChange={() => handleStatusChange(row)} className="shrink-0 mt-0.5" />}
-                        <span className={completed ? 'text-emerald-700' : 'text-amber-700'}>{completed ? 'Selesai' : 'Tindak lanjut'}</span>
+                  <td className="sticky left-0 z-[20] bg-inherit p-0 align-top font-semibold border-r border-slate-200 shadow-[1px_0_0_0_#e2e8f0]">
+                    <div className="sticky top-[46px] px-2 py-3 md:p-4 flex flex-col gap-1 w-[110px] md:w-40 max-h-max bg-inherit">
+                      <label className="flex items-start gap-1.5 md:gap-2 cursor-pointer">
+                        {canUpdateStatus && <input type="checkbox" checked={completed} onChange={() => handleStatusChange(row)} className="shrink-0 mt-0.5 md:mt-1" />}
+                        <span className={`text-[11px] md:text-sm leading-tight ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{completed ? 'Selesai' : 'Tindak lanjut'}</span>
                       </label>
                       <button
                         type="button"
                         onClick={() => toggleRowExpand(rowKeyValue)}
-                        className="text-[11px] font-bold text-blue-600 hover:underline text-left w-max"
+                        className="text-[10px] md:text-[11px] font-bold text-blue-600 hover:underline text-left w-max md:mt-1 p-0.5"
                       >
                         {isExpanded ? 'Lebih ringkas' : 'Lihat semua'}
                       </button>
                     </div>
                   </td>
 
-                  {/* FIX: line-clamp-2 diterapkan dengan styling break-word kuat */}
+                  {/* HARDCODE INLINE STYLE UNTUK MEMAKSA TINGGI BARIS */}
                   {visibleHeaders.map((header, headerIndex) => {
                     const isFrozen = headerIndex < freezeColumnsCount;
-                    const leftOffset = isFrozen ? 160 + headerIndex * 200 : 0;
+                    const leftOffset = isFrozen ? (window.innerWidth < 768 ? 110 : 160) + headerIndex * 200 : 0;
                     return (
                       <td
                         key={`${rowKeyValue}-${header}`}
-                        className="px-4 py-4 align-top text-slate-700"
-                        style={{ maxWidth: '280px', minWidth: '150px', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 15, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
+                        className="px-3 md:px-4 py-3 md:py-4 align-top text-slate-700 text-xs md:text-sm"
+                        style={{ maxWidth: '280px', minWidth: '130px', ...(isFrozen ? { position: 'sticky', left: `${leftOffset}px`, zIndex: 15, backgroundColor: completed ? '#ecfdf5' : '#ffffff' } : {}) }}
                       >
-                        <div className={`transition-all duration-200 ${isExpanded ? '' : 'line-clamp-2'}`} style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                        <div 
+                          className="transition-all duration-200"
+                          style={{ 
+                            wordBreak: 'break-word', 
+                            ...(isExpanded ? { whiteSpace: 'pre-wrap' } : {
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              maxHeight: '3rem'
+                            })
+                          }}
+                        >
                           {isLinkColumn(header) && row[header] ? (
-                            <a href={row[header]} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100 hover:underline">
+                            <a href={row[header]} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full bg-blue-50 px-2 md:px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100 hover:underline truncate max-w-full">
                               Buka link
                             </a>
                           ) : isMetadataColumn(header) ? (
-                            <span className="inline-flex rounded-lg bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">{row[header] || '-'}</span>
+                            <span className="inline-flex rounded-lg bg-blue-50 px-1.5 md:px-2 py-0.5 md:py-1 font-medium text-blue-700 text-[10px] md:text-xs">{row[header] || '-'}</span>
                           ) : (
-                            <span className="leading-relaxed">{String(row[header] ?? '-')}</span>
+                            <span>{String(row[header] ?? '-')}</span>
                           )}
                         </div>
                       </td>
                     );
                   })}
 
-                  <td className="whitespace-normal px-4 py-4 align-top text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
-                    <div className={`transition-all duration-200 ${isExpanded ? '' : 'line-clamp-2'}`}>
+                  <td className="px-3 md:px-4 py-3 md:py-4 align-top text-[10px] md:text-xs text-slate-500" style={{ overflowWrap: 'anywhere' }}>
+                    <div 
+                      className="transition-all duration-200"
+                      style={{ 
+                        ...(isExpanded ? { whiteSpace: 'pre-wrap' } : {
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          maxHeight: '3rem'
+                        })
+                      }}
+                    >
                       {row._sources?.join(', ')}
                     </div>
                   </td>
@@ -1095,33 +1117,33 @@ export default function PenyelesaianDetail() {
             </tbody>
           </table>
 
-          {paginatedRows.length === 0 && <div className="p-10 text-center text-slate-500">Tidak ada data sesuai filter.</div>}
+          {paginatedRows.length === 0 && <div className="p-10 text-center text-sm md:text-base text-slate-500">Tidak ada data sesuai filter.</div>}
         </div>
         
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-3 md:px-4 py-3">
           <button
             type="button"
             onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
             disabled={safePage === 1}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex flex-1 md:flex-none items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs md:text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <ChevronLeft size={16} /> Sebelumnya
+            <ChevronLeft size={16} /> <span className="hidden sm:inline">Sebelumnya</span>
           </button>
-          <div className="text-sm font-medium text-slate-600">
+          <div className="text-xs md:text-sm font-medium text-slate-600 order-first w-full sm:w-auto text-center sm:order-none">
             Halaman {safePage} dari {totalPages}
           </div>
           <button
             type="button"
             onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
             disabled={safePage === totalPages}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex flex-1 md:flex-none items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs md:text-sm text-slate-600 hover:bg-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Selanjutnya <ChevronRight size={16} />
+            <span className="hidden sm:inline">Selanjutnya</span> <ChevronRight size={16} />
           </button>
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">Duplikat berdasarkan kolom referensi diabaikan. Jika salah satu versi sudah selesai, versi selesai dipertahankan; nilai berbeda pada kolom lain digabungkan.</p>
+      <p className="text-[10px] md:text-xs text-slate-500 text-center md:text-left pb-4">Duplikat berdasarkan kolom referensi diabaikan. Jika salah satu versi sudah selesai, versi selesai dipertahankan; nilai berbeda pada kolom lain digabungkan.</p>
     </div>
   );
 }
@@ -1132,35 +1154,35 @@ function ColumnFilterMenu({ header, options, selectedValues, open, onToggleOpen,
       <button
         type="button"
         onClick={onToggleOpen}
-        className={`rounded-lg border px-2 py-1 text-xs ${selectedValues.length ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-600/20 bg-white text-slate-300 hover:text-slate-600'}`}
+        className={`rounded-lg border px-1.5 md:px-2 py-1 text-[10px] md:text-xs ${selectedValues.length ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-600/20 bg-white text-slate-300 hover:text-slate-600'}`}
         aria-label={`Filter ${header}`}
       >
         <Filter size={12} />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-[80] mt-2 w-[calc(100vw-2rem)] max-w-xs rounded-xl border border-slate-200 bg-white p-3 shadow-xl md:w-64">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filter {header}</p>
-            <button type="button" onClick={onClear} className="text-[11px] font-medium text-blue-600 hover:underline">
+            <p className="text-[10px] md:text-xs font-semibold uppercase tracking-wider text-slate-500">Filter {header}</p>
+            <button type="button" onClick={onClear} className="text-[11px] font-medium text-blue-600 hover:underline p-1">
               Reset
             </button>
           </div>
 
-          <div className="max-h-64 space-y-2 overflow-auto pr-1">
+          <div className="max-h-56 md:max-h-64 space-y-2 overflow-auto pr-1">
             {options.length === 0 ? (
-              <p className="text-xs text-slate-400">Belum ada data pada kolom ini.</p>
+              <p className="text-[10px] md:text-xs text-slate-400">Belum ada data pada kolom ini.</p>
             ) : (
               options.map((option) => (
                 <label key={option} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
-                  <input type="checkbox" checked={selectedValues.includes(option)} onChange={() => onToggleValue(option)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                  <span className="truncate text-sm text-slate-700">{option}</span>
+                  <input type="checkbox" checked={selectedValues.includes(option)} onChange={() => onToggleValue(option)} className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 shrink-0" />
+                  <span className="truncate text-xs md:text-sm text-slate-700">{option}</span>
                 </label>
               ))
             )}
           </div>
 
-          <button type="button" onClick={onClose} className="mt-3 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700">
+          <button type="button" onClick={onClose} className="mt-3 w-full rounded-lg bg-slate-900 px-3 py-2 text-[10px] md:text-xs font-semibold text-white hover:bg-slate-700">
             Tutup
           </button>
         </div>
@@ -1169,14 +1191,14 @@ function ColumnFilterMenu({ header, options, selectedValues, open, onToggleOpen,
   );
 }
 
-function Stat({ icon, label, value, color }) {
+function Stat({ icon, label, value, color, className = '' }) {
   const colors = { blue: 'bg-blue-50 text-blue-600', emerald: 'bg-emerald-50 text-emerald-600', amber: 'bg-amber-50 text-amber-600' };
   return (
-    <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className={`rounded-xl p-3 ${colors[color]}`}>{icon}</div>
+    <div className={`flex items-center gap-3 md:gap-4 rounded-2xl border border-slate-200 bg-white p-4 md:p-5 shadow-sm ${className}`}>
+      <div className={`rounded-xl p-2 md:p-3 ${colors[color]}`}>{icon}</div>
       <div>
-        <p className="text-sm text-slate-500">{label}</p>
-        <p className="text-2xl font-bold text-slate-900">{value}</p>
+        <p className="text-xs md:text-sm text-slate-500">{label}</p>
+        <p className="text-xl md:text-2xl font-bold text-slate-900">{value}</p>
       </div>
     </div>
   );
