@@ -144,21 +144,20 @@ export default function DaftarAnomali() {
     }
   };
 
-  const handleSqlFile = async (event) => {
-    const files = event.target.files;
-    if (!files?.length) return;
-    setSqlFileLoading(true);
-    try {
-      const sqlQuery = await readSqlInput(files);
-      setSqlFiles([...files]);
-      setFormData((current) => ({ ...current, sql_query: sqlQuery }));
-    } catch (error) {
-      alert(`Gagal membaca file SQL: ${error.message}`);
-    } finally {
-      setSqlFileLoading(false);
-      event.target.value = '';
-    }
-  };
+  const handleSqlFile = async (files) => { // 1. Ubah parameter event menjadi files
+      if (!files?.length) return;
+      setSqlFileLoading(true);
+      try {
+        const sqlQuery = await readSqlInput(files);
+        setSqlFiles([...files]);
+        setFormData((current) => ({ ...current, sql_query: sqlQuery }));
+      } catch (error) {
+        alert(`Gagal membaca file SQL: ${error.message}`);
+      } finally {
+        setSqlFileLoading(false);
+        // 2. Hapus baris event.target.value = ''; karena memicu error (event is undefined)
+      }
+    };
 
   const handleEdit = (item) => {
     setEditingId(item.id);
