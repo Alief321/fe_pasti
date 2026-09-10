@@ -798,7 +798,6 @@ export default function PenyelesaianDetail() {
         </section>
       )}
 
-      {/* FILTER SECTION DENGAN Z-INDEX MUTLAK */}
       <section className="relative md:sticky md:top-3 z-[60] flex flex-col md:flex-row md:flex-wrap md:items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-lg shadow-slate-200/40 backdrop-blur">
         <div className="flex w-full items-center gap-2 md:w-auto md:flex-1">
           <div className="relative min-w-0 flex-1">
@@ -839,7 +838,6 @@ export default function PenyelesaianDetail() {
               <SlidersHorizontal size={16} /> Kolom{hiddenColumns.length ? ` (${hiddenColumns.length} tersembunyi)` : ''}
             </button>
             
-            {/* Z-INDEX TERTINGGI UNTUK DROPDOWN KOLOM */}
             {hiddenColumnsOpen && (
               <div className="absolute left-0 top-full z-[100] mt-2 w-[calc(100vw-2rem)] max-w-xs rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl md:left-auto md:right-0 md:w-72">
                 <div className="mb-2 flex items-center justify-between">
@@ -999,7 +997,6 @@ export default function PenyelesaianDetail() {
       )}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col relative z-10 w-full">
-        {/* MOBILE OPTIMIZATION: overflow-x-auto ditambahkan pada wrapper ini */}
         <div ref={tableViewportRef} className="overflow-x-auto overflow-y-auto w-full max-h-[65vh] md:max-h-[72vh] touch-pan-x touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
           <table className="min-w-full table-fixed border-collapse text-left text-sm relative">
             <thead className="sticky top-0 z-[40] bg-slate-900 text-white shadow-sm">
@@ -1042,8 +1039,16 @@ export default function PenyelesaianDetail() {
               return (
                 <tr key={rowKeyValue} className={completed ? 'bg-emerald-50/90' : 'hover:bg-blue-50/90'}>
                   
+                  {/* PENERAPAN STICKY YANG BENAR DALAM CELL TABEL */}
                   <td className="sticky left-0 z-[20] bg-inherit p-0 align-top font-semibold border-r border-slate-200 shadow-[1px_0_0_0_#e2e8f0]">
-                    <div className="sticky top-[46px] px-2 py-3 md:p-4 flex flex-col gap-1 w-[110px] md:w-40 max-h-max bg-inherit">
+                    <div 
+                      className="sticky flex flex-col gap-1 w-[110px] md:w-40 px-2 py-3 md:p-4 bg-inherit"
+                      style={{ 
+                        top: '50px', // Jarak atas disesuaikan dengan tinggi header (thead)
+                        height: 'max-content', // KUNCI: Mencegah div meregang ke seluruh tinggi tabel sehingga ruang luncur tercipta
+                        zIndex: 25
+                      }}
+                    >
                       <label className="flex items-start gap-1.5 md:gap-2 cursor-pointer">
                         {canUpdateStatus && <input type="checkbox" checked={completed} onChange={() => handleStatusChange(row)} className="shrink-0 mt-0.5 md:mt-1" />}
                         <span className={`text-[11px] md:text-sm leading-tight ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{completed ? 'Selesai' : 'Tindak lanjut'}</span>
@@ -1058,7 +1063,6 @@ export default function PenyelesaianDetail() {
                     </div>
                   </td>
 
-                  {/* HARDCODE INLINE STYLE UNTUK MEMAKSA TINGGI BARIS */}
                   {visibleHeaders.map((header, headerIndex) => {
                     const isFrozen = headerIndex < freezeColumnsCount;
                     const leftOffset = isFrozen ? (window.innerWidth < 768 ? 110 : 160) + headerIndex * 200 : 0;
